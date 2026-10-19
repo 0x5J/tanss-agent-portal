@@ -481,6 +481,31 @@ describe("runUpdate", () => {
     expect(mutating(t.calls).slice(-2)).toEqual([`removeContainer(${NEW_ID})`, `renameContainer(${OLD_ID}, ${NAME})`]);
   });
 
+  it("rolls back on an error without a message instead of taking it for success", async () => {
+    const fake = fakeDocker();
+    const t = setup({
+      docker: {
+        calls: fake.calls,
+        docker: {
+          ...fake.docker,
+          async startContainer(id) {
+            fake.calls.push(["startContainer", id]);
+            if (id === NEW_ID) throw new Error("");
+          },
+        },
+      },
+    });
+    const result = await runUpdate(t.deps, REQUEST);
+    expect(result.state).toBe("rolledBack");
+    expect(result.message).toBe("unbekannter Fehler");
+    expect(names(t.calls)).not.toContain(`removeContainer(${OLD_ID})`);
+    expect(mutating(t.calls).slice(-3)).toEqual([
+      `removeContainer(${NEW_ID})`,
+      `renameContainer(${OLD_ID}, ${NAME})`,
+      `startContainer(${OLD_ID})`,
+    ]);
+  });
+
   it("stays done when removing the old container fails", async () => {
     const t = setup({
       docker: fakeDocker({ fail: { removeContainer: (id) => (id === OLD_ID ? "device busy" : undefined) } }),

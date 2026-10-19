@@ -25,8 +25,11 @@ export interface UpdateDeps {
   healthTimeoutMs?: number;
 }
 
+const UNKNOWN_ERROR = "unbekannter Fehler";
+
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const text = err instanceof Error ? err.message : String(err);
+  return text || UNKNOWN_ERROR;
 }
 
 /** Splits "registry:port/repo:tag" into repo and tag; digests and missing tags give tag null. */
@@ -134,7 +137,8 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   let renamed = false;
   let createAttempted = false;
   let newId: string | null = null;
-  let cause: string;
+  let ok = false;
+  let cause = UNKNOWN_ERROR;
   try {
     report("starting", "Portal startet neu");
     await docker.stopContainer(old.Id, STOP_TIMEOUT_SECONDS);
@@ -148,12 +152,14 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     await docker.startContainer(newId);
 
     report("checking", "neue Version wird geprüft");
-    cause = await waitForVersion(deps, newId, port, version);
+    const failure = await waitForVersion(deps, newId, port, version);
+    if (failure === null) ok = true;
+    else cause = failure;
   } catch (err) {
     cause = errorText(err);
   }
 
-  if (!cause) return finish(deps, report, old.Id, imageRef, oldImageRef, version);
+  if (ok) return finish(deps, report, old.Id, imageRef, oldImageRef, version);
 
   try {
     if (newId) {
@@ -174,8 +180,13 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   return report("rolledBack", cause);
 }
 
-/** Polls /health of the new container; returns "" on success, else the reason. */
-async function waitForVersion(deps: UpdateDeps, id: string, port: number, version: string): Promise<string> {
+/** Polls /health of the new container; returns null on success, else the reason. */
+async function waitForVersion(
+  deps: UpdateDeps,
+  id: string,
+  port: number,
+  version: string,
+): Promise<string | null> {
   const timeout = deps.healthTimeoutMs ?? HEALTH_TIMEOUT_MS;
   const started = deps.now();
   let ip = "";
@@ -190,7 +201,7 @@ async function waitForVersion(deps: UpdateDeps, id: string, port: number, versio
     }
     if (ip) {
       const answer = await askHealth(deps, healthUrl(ip, port));
-      if (answer === version) return "";
+      if (answer === version) return null;
       if (answer) reported = answer;
     }
     if (deps.now() - started >= timeout) break;
