@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "node:path";
 import { buildApp } from "./app.ts";
 import { loadConfig } from "./config.ts";
 import { createCallLog, loggableBody } from "./log.ts";
@@ -8,6 +9,9 @@ import { createPoller } from "./poller.ts";
 import { createLoginGate } from "./login.ts";
 import { createSharedSession } from "./shared-session.ts";
 import { createLinearClient } from "./linear.ts";
+import { createReleaseSource } from "./releases.ts";
+import { createUpdateService } from "./updates.ts";
+import { VERSION } from "./version.ts";
 
 const config = loadConfig(process.env);
 const traceAll = process.env.DEBUG_TANSS === "1";
@@ -77,6 +81,14 @@ function measureSoon(): void {
   setTimeout(() => void poller.tick(), 1_500).unref?.();
 }
 
+const updates = createUpdateService({
+  dir: path.join(config.dataDir, "update"),
+  current: VERSION,
+  channel: config.updateChannel,
+  enabled: config.updateCheck,
+  source: createReleaseSource({ repo: "0x5J/tanss-agent-portal" }),
+});
+
 const app = await buildApp({
   sessionSecret: config.sessionSecret,
   tanss,
@@ -87,6 +99,7 @@ const app = await buildApp({
   collectorHealth: () => poller.health(),
   shared,
   ...(config.linearApiKey ? { linear: createLinearClient({ apiKey: config.linearApiKey }) } : {}),
+  updates,
   onLogin: () => void poller.tick(),
   onAssignment: () => void measureSoon(),
   log: callLog,
@@ -106,6 +119,9 @@ if (config.serveStatic) {
 console.log(`Agent-Daten in ${config.dataDir}`);
 if (config.totp) console.log("2FA-Code wird aus TOTP_SECRET erzeugt");
 poller.start();
+updates.start();
+console.log(`Update-Kanal: ${config.updateChannel}`);
+if (!config.updateCheck) console.log("UPDATE_CHECK=0: die Suche nach neuen Versionen ist aus");
 console.log(
   "Dashboard-Sammler alle 5 Minuten — er nutzt die Sitzung aus der Anmeldemaske, ohne gespeichertes Passwort",
 );

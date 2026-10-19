@@ -11,6 +11,7 @@ import { ApprovalsView } from "./views/Approvals.tsx";
 import { LogView } from "./views/Log.tsx";
 import { ImportView } from "./views/Import.tsx";
 import { SettingsView } from "./views/Settings.tsx";
+import { UpdateBanner } from "./UpdateBanner.tsx";
 import { Palette } from "./Palette.tsx";
 import { AgentSidebar } from "./AgentSidebar.tsx";
 import type { TicketRow } from "../shared/tickets.ts";
@@ -284,15 +285,18 @@ export function App() {
           />
         }
         banner={
-          tanssDown ? (
-            <div className="banner">
-              <span className="dot sm warn" />
-              <span>TANSS-API antwortet nicht: {tanssDown}</span>
-              <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setTanssDown(null)}>
-                Ausblenden
-              </button>
-            </div>
-          ) : null
+          <>
+            {tanssDown ? (
+              <div className="banner">
+                <span className="dot sm warn" />
+                <span>TANSS-API antwortet nicht: {tanssDown}</span>
+                <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setTanssDown(null)}>
+                  Ausblenden
+                </button>
+              </div>
+            ) : null}
+            <UpdateBanner onToast={showToast} onError={report} />
+          </>
         }
       >
         {view === "dashboard" ? (

@@ -5,6 +5,8 @@ import { parseTotpConfig, generateTotp } from "./totp.ts";
 import { TanssError, type TanssClient } from "./tanss.ts";
 import { createMemoryStore } from "./store.ts";
 import { berlinDayRangeUnix } from "../shared/days.ts";
+import { UpdateError, type UpdateService } from "./updates.ts";
+import type { UpdateOverview } from "../shared/update.ts";
 
 const SECRET = "x".repeat(32);
 const SESSION = { employeeId: 7, apiKey: "Bearer a", refresh: "Bearer r", expire: 9_999_999_999 };
@@ -495,5 +497,126 @@ describe("supports", () => {
       expect(res.json().error).toBe("Mitarbeiter ungültig");
     }
     expect(calls.some((c) => c.name === "listSupports")).toBe(false);
+  });
+});
+
+describe("update routes", () => {
+  const OVERVIEW: UpdateOverview = {
+    current: "0.1.0",
+    channel: "stable",
+    enabled: true,
+    latest: null,
+    checkedAt: 123,
+    checkError: null,
+    updater: "ready",
+    requested: null,
+    status: null,
+  };
+
+  function fakeUpdates(overrides: Partial<UpdateService> = {}) {
+    const requested: string[] = [];
+    const service: UpdateService = {
+      overview: () => OVERVIEW,
+      check: async () => ({ ...OVERVIEW, checkedAt: 456 }),
+      request: (version) => {
+        requested.push(version);
+        return { ...OVERVIEW, requested: { id: "r1", version, requestedAt: 1 } };
+      },
+      start: () => {},
+      stop: () => {},
+      ...overrides,
+    };
+    return { service, requested };
+  }
+
+  async function withUpdates(updates?: UpdateService) {
+    const { client } = fakeTanss();
+    const app = await buildApp({
+      sessionSecret: SECRET,
+      tanss: client,
+      enableRateLimit: false,
+      totp: null,
+      ...(updates ? { updates } : {}),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { username: "sb", password: "pw", token: "123456" },
+    });
+    const header = res.headers["set-cookie"];
+    const cookie = Array.isArray(header) ? header[0]! : String(header ?? "");
+    return { app, cookie };
+  }
+
+  const routes = [
+    { method: "GET", url: "/me/update", payload: undefined },
+    { method: "POST", url: "/me/update/check", payload: undefined },
+    { method: "POST", url: "/me/update", payload: { version: "0.2.0" } },
+  ] as const;
+
+  it("needs a login on all three routes", async () => {
+    const { service } = fakeUpdates();
+    const { app } = await withUpdates(service);
+    for (const r of routes) {
+      const res = await app.inject({ method: r.method, url: r.url, payload: r.payload });
+      expect(res.statusCode, `${r.method} ${r.url}`).toBe(401);
+    }
+  });
+
+  it("answers with the overview of the service", async () => {
+    const { service, requested } = fakeUpdates();
+    const { app, cookie } = await withUpdates(service);
+    const headers = { cookie };
+    const get = await app.inject({ method: "GET", url: "/me/update", headers });
+    expect(get.statusCode).toBe(200);
+    expect(get.json()).toEqual(OVERVIEW);
+    const check = await app.inject({ method: "POST", url: "/me/update/check", headers });
+    expect(check.statusCode).toBe(200);
+    expect(check.json().checkedAt).toBe(456);
+    const post = await app.inject({
+      method: "POST",
+      url: "/me/update",
+      headers,
+      payload: { version: "0.2.0" },
+    });
+    expect(post.statusCode).toBe(200);
+    expect(post.json().requested.version).toBe("0.2.0");
+    expect(requested).toEqual(["0.2.0"]);
+  });
+
+  it("passes a refused request on with its status and message", async () => {
+    const { service } = fakeUpdates({
+      request: () => {
+        throw new UpdateError(409, "Es läuft bereits eine Aktualisierung");
+      },
+    });
+    const { app, cookie } = await withUpdates(service);
+    const res = await app.inject({
+      method: "POST",
+      url: "/me/update",
+      headers: { cookie },
+      payload: { version: "0.2.0" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "Es läuft bereits eine Aktualisierung" });
+  });
+
+  it("rejects a body without a version", async () => {
+    const { service, requested } = fakeUpdates();
+    const { app, cookie } = await withUpdates(service);
+    for (const payload of [{}, { version: 3 }, { version: "" }]) {
+      const res = await app.inject({ method: "POST", url: "/me/update", headers: { cookie }, payload });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(requested).toEqual([]);
+  });
+
+  it("answers 404 when no update service is configured", async () => {
+    const { app, cookie } = await withUpdates();
+    for (const r of routes) {
+      const res = await app.inject({ method: r.method, url: r.url, headers: { cookie }, payload: r.payload });
+      expect(res.statusCode, `${r.method} ${r.url}`).toBe(404);
+      expect(res.json()).toEqual({ error: "Updates nicht eingerichtet" });
+    }
   });
 });
