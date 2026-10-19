@@ -41,8 +41,9 @@ type Props = {
   /** Model name when the local AI is set up, empty otherwise. */
   agentModel: string;
   approvalCount: number;
-  /** Running version or pending update; a click opens the settings. */
+  /** Running version or pending update; a click starts the update (after asking) or opens the settings. */
   update: UpdateIndicator;
+  onStartUpdate: (version: string) => void;
   subtitle: string;
   query: string;
   onQuery: (query: string) => void;
@@ -99,7 +100,11 @@ export function Shell(props: Props) {
           <button
             className={`nav-status nav-version ${props.update.tone}`}
             title={props.update.title}
-            onClick={() => props.onView("settings")}
+            onClick={() => {
+              const version = props.update.start;
+              if (version) props.onStartUpdate(version);
+              else props.onView("settings");
+            }}
           >
             <span className={`dot sm ${UPDATE_DOT[props.update.tone]}`} />
             <span>Version</span>

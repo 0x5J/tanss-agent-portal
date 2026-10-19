@@ -11,7 +11,7 @@ import { ApprovalsView } from "./views/Approvals.tsx";
 import { LogView } from "./views/Log.tsx";
 import { ImportView } from "./views/Import.tsx";
 import { SettingsView } from "./views/Settings.tsx";
-import { UpdateBanner } from "./UpdateBanner.tsx";
+import { confirmAndStartUpdate, UpdateBanner } from "./UpdateBanner.tsx";
 import { useUpdateOverview } from "./useUpdateOverview.ts";
 import { updateIndicator } from "../shared/update.ts";
 import { Palette } from "./Palette.tsx";
@@ -267,6 +267,9 @@ export function App() {
         agentModel={agent?.ready ? agent.model : ""}
         approvalCount={approvalCount}
         update={updateIndicator(updates.overview, updates.now, __APP_VERSION__)}
+        onStartUpdate={(version) =>
+          void confirmAndStartUpdate(version, { onOverview: updates.replace, onToast: showToast, onError: report })
+        }
         subtitle={subtitle}
         query={query}
         onQuery={setQuery}

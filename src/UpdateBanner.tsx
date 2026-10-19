@@ -12,6 +12,31 @@ function readDismissed(): string | null {
   }
 }
 
+type StartHandlers = {
+  onOverview: (next: UpdateOverview) => void;
+  onToast: (text: string) => void;
+  onError: (error: unknown) => void;
+};
+
+/**
+ * Asks before anything happens, then hands the version to the updater. The
+ * banner button and the version line in the navigation both come here.
+ * Returns once the request is answered, whatever the outcome.
+ */
+export async function confirmAndStartUpdate(version: string, handlers: StartHandlers): Promise<void> {
+  const ok = window.confirm(
+    `Das Portal startet dabei neu und ist etwa eine Minute nicht erreichbar. Jetzt auf ${version} aktualisieren?`,
+  );
+  if (!ok) return;
+  try {
+    handlers.onOverview(await api.startUpdate(version));
+  } catch (error) {
+    // 409 / 503 carry a sentence for the user; report() would mistake 503 for TANSS being down.
+    if (error instanceof ApiError && (error.status === 409 || error.status === 503)) handlers.onToast(error.message);
+    else handlers.onError(error);
+  }
+}
+
 type Props = {
   /** From useUpdateOverview; null shows nothing. */
   overview: UpdateOverview | null;
@@ -37,20 +62,9 @@ export function UpdateBanner(props: Props) {
 
   async function start() {
     if (!latest) return;
-    const ok = window.confirm(
-      `Das Portal startet dabei neu und ist etwa eine Minute nicht erreichbar. Jetzt auf ${latest.version} aktualisieren?`,
-    );
-    if (!ok) return;
     setStarting(true);
-    try {
-      onOverview(await api.startUpdate(latest.version));
-    } catch (error) {
-      // 409 / 503 carry a sentence for the user; report() would mistake 503 for TANSS being down.
-      if (error instanceof ApiError && (error.status === 409 || error.status === 503)) onToast(error.message);
-      else onError(error);
-    } finally {
-      setStarting(false);
-    }
+    await confirmAndStartUpdate(latest.version, { onOverview, onToast, onError });
+    setStarting(false);
   }
 
   function dismiss() {

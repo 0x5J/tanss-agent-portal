@@ -162,6 +162,8 @@ export type UpdateIndicator = {
   text: string;
   /** The full sentence, for the tooltip. */
   title: string;
+  /** The version a click would update to; null when there is nothing to start. */
+  start: string | null;
 };
 
 /**
@@ -170,8 +172,12 @@ export type UpdateIndicator = {
  */
 export function updateIndicator(o: UpdateOverview | null, now: number, version: string): UpdateIndicator {
   const banner = o ? updateBanner(o, now) : null;
-  if (!o || !banner) return { tone: "idle", text: version, title: `Agent-Portal ${version}` };
-  if (banner.tone === "progress") return { tone: "progress", text: "Update läuft", title: banner.text };
-  if (banner.tone === "error") return { tone: "error", text: "fehlgeschlagen", title: banner.text };
-  return { tone: "available", text: `${o.latest?.version ?? ""} verfügbar`, title: banner.text };
+  if (!o || !banner) return { tone: "idle", text: version, title: `Agent-Portal ${version}`, start: null };
+  if (banner.tone === "progress") return { tone: "progress", text: "Update läuft", title: banner.text, start: null };
+  if (banner.tone === "error") return { tone: "error", text: "fehlgeschlagen", title: banner.text, start: null };
+  const offered = o.latest?.version ?? "";
+  // Without a running updater the banner says how to update by hand; nothing to start.
+  const start = banner.action === "update" ? offered : null;
+  const title = start ? `${banner.text} Klicken zum Aktualisieren.` : banner.text;
+  return { tone: "available", text: `${offered} verfügbar`, title, start };
 }
