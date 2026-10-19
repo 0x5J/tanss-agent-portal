@@ -138,12 +138,13 @@ export function createLoop(opts: LoopOptions): { tick(): Promise<void> } {
       const read = readSmallFile(file);
       if ("missing" in read && read.missing) return; // no request pending
 
-      // Delete first: a crash mid-update must never replay the request.
-      // (rmSync removes a symlink itself, it does not follow it.)
-      try {
-        rmSync(file, { force: true });
-      } catch {
-        // e.g. a directory in its place: still report it, never run it
+      // rmSync removes a symlink itself, it does not follow it.
+      function removeRequest(): void {
+        try {
+          rmSync(file, { force: true });
+        } catch {
+          // e.g. a directory in its place: still report it, never run it
+        }
       }
 
       let raw: unknown = null;
@@ -163,10 +164,27 @@ export function createLoop(opts: LoopOptions): { tick(): Promise<void> } {
           message: "Auftrag unlesbar",
           at: opts.now(),
         } satisfies UpdateStatus);
+        removeRequest();
         return;
       }
-      // Guards against a duplicate write of a request that was already handled.
-      if (str(readJson(path.join(opts.dir, STATUS_FILE)), "id") === raw.id) return;
+      // Guards against a duplicate write of a request that was already handled
+      // or confirmed before a crash.
+      if (str(readJson(path.join(opts.dir, STATUS_FILE)), "id") === raw.id) {
+        removeRequest();
+        return;
+      }
+
+      // Confirm first, so the portal never sees neither a request nor a status;
+      // then delete: a crash mid-update must never replay the request.
+      write(STATUS_FILE, {
+        id: raw.id,
+        state: "pulling",
+        from: "",
+        to: raw.version,
+        message: "Auftrag angenommen",
+        at: opts.now(),
+      } satisfies UpdateStatus);
+      removeRequest();
 
       write(STATUS_FILE, await opts.run(raw));
     } finally {

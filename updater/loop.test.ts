@@ -1,6 +1,7 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -82,6 +83,39 @@ describe("createLoop", () => {
     });
     await loop.tick();
     expect(existedDuringRun).toBe(false);
+  });
+
+  it("confirms the request in status.json before it runs", async () => {
+    writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+    let seen: unknown = null;
+    const { loop } = setup(async (r) => {
+      seen = readJson("status.json");
+      return done(r.id);
+    });
+    await loop.tick();
+    expect(seen).toEqual({ id: "r1", state: "pulling", from: "", to: "0.2.0", message: "Auftrag angenommen", at: 4242 });
+  });
+
+  it("keeps the request when the confirmation cannot be written", async () => {
+    // A directory in place of status.json makes the atomic rename fail.
+    mkdirSync(path.join(dir, "status.json"));
+    writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+    const { loop, calls } = setup();
+    await expect(loop.tick()).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+    expect(existsSync(path.join(dir, "request.json"))).toBe(true);
+  });
+
+  it("does not replay a request that was confirmed before a crash", async () => {
+    writeFileSync(
+      path.join(dir, "status.json"),
+      JSON.stringify({ id: "r1", state: "pulling", from: "", to: "0.2.0", message: "Auftrag angenommen", at: 1 }),
+    );
+    writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+    const { loop, calls } = setup();
+    await loop.tick();
+    expect(calls).toHaveLength(0);
+    expect(existsSync(path.join(dir, "request.json"))).toBe(false);
   });
 
   it("reports a garbled request as failed", async () => {
