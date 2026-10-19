@@ -2,7 +2,9 @@
 // the updater image has no npm dependencies.
 import { request } from "node:http";
 
-const MAX_API_VERSION = "1.47";
+// 1.48 brings the per-platform manifest data (ImageManifestDescriptor,
+// ?manifests=1) needed for compose's image label on the containerd store.
+const MAX_API_VERSION = "1.48";
 const REQUEST_TIMEOUT_MS = 60_000;
 const PULL_TIMEOUT_MS = 10 * 60_000;
 
@@ -14,6 +16,19 @@ export class DockerError extends Error {
     this.name = "DockerError";
     this.status = status;
   }
+}
+
+export interface Platform {
+  os?: string;
+  architecture?: string;
+  variant?: string;
+}
+
+export interface Descriptor {
+  digest: string;
+  mediaType?: string;
+  platform?: Platform;
+  [key: string]: unknown;
 }
 
 export interface ContainerInfo {
@@ -29,6 +44,8 @@ export interface ContainerInfo {
   };
   HostConfig: Record<string, unknown>;
   State?: { Running?: boolean; [key: string]: unknown };
+  /** API >= 1.48 on the containerd image store: the platform manifest the container runs. */
+  ImageManifestDescriptor?: Descriptor;
   NetworkSettings: {
     Networks: Record<string, { IPAddress: string; Aliases: string[] | null; [key: string]: unknown }>;
   };
@@ -41,12 +58,14 @@ export interface ImageInfo {
     Labels: Record<string, string> | null;
     [key: string]: unknown;
   };
+  /** API >= 1.48 with ?manifests=1 on the containerd image store. */
+  Manifests?: { Kind?: string; Available?: boolean; Descriptor: Descriptor; [key: string]: unknown }[];
 }
 
 export interface DockerApi {
   inspectContainer(id: string): Promise<ContainerInfo>;
   listContainers(labels: Record<string, string>): Promise<{ Id: string; Names: string[] }[]>;
-  inspectImage(ref: string): Promise<ImageInfo>;
+  inspectImage(ref: string, opts?: { manifests?: boolean }): Promise<ImageInfo>;
   pullImage(repo: string, tag: string): Promise<void>;
   tagImage(ref: string, repo: string, tag: string): Promise<void>;
   createContainer(name: string, body: object): Promise<string>;
@@ -57,7 +76,7 @@ export interface DockerApi {
   connectNetwork(network: string, id: string, endpoint: object): Promise<void>;
 }
 
-// Numeric "major.minor" comparison (1.9 < 1.47), not string comparison.
+// Numeric "major.minor" comparison (1.9 < 1.48), not string comparison.
 function compareVersions(a: string, b: string): number {
   const [aMajor = 0, aMinor = 0] = a.split(".").map(Number);
   const [bMajor = 0, bMinor = 0] = b.split(".").map(Number);
@@ -177,8 +196,9 @@ export function createDockerApi(
       const text = await call("GET", `/containers/json?all=1&filters=${enc(JSON.stringify(filters))}`);
       return JSON.parse(text) as { Id: string; Names: string[] }[];
     },
-    async inspectImage(ref) {
-      return JSON.parse(await call("GET", `/images/${enc(ref)}/json`)) as ImageInfo;
+    async inspectImage(ref, o = {}) {
+      const query = o.manifests ? "?manifests=1" : "";
+      return JSON.parse(await call("GET", `/images/${enc(ref)}/json${query}`)) as ImageInfo;
     },
     async pullImage(repo, tag) {
       const text = await call("POST", `/images/create?fromImage=${enc(repo)}&tag=${enc(tag)}`, {

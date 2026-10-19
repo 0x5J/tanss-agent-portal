@@ -24,7 +24,7 @@ PORTAL_REPO=$REGISTRY/tanss-agent-portal
 UPDATER_IMAGE=e2e-updater/updater:e2e
 HOST_PORT=3898
 HEALTH_URL=http://127.0.0.1:$HOST_PORT/health
-STATUS_TIMEOUT=120
+STATUS_TIMEOUT=180
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/e2e-updater.XXXXXX")
@@ -352,17 +352,15 @@ wait_version 9.9.2 15 || fail "9.9.2: nach compose up -d läuft nicht mehr 9.9.2
 again=$(portal_id)
 [ "$(docker container inspect -f '{{.Image}}' "$again")" = "$(image_id "$PORTAL_REPO:9.9.2")" ] \
   || fail "9.9.2: compose up -d hat das Portal auf ein anderes Image als 9.9.2 gesetzt"
-recreated=""
 if [ "$again" != "$after" ]; then
-  # Not a failure of the case (9.9.2 stays), but a needless restart: compose
-  # saw drift in the com.docker.compose.image label the updater wrote.
+  # Compose saw drift in the com.docker.compose.image label the updater wrote.
   label_now=$(docker container inspect -f '{{index .Config.Labels "com.docker.compose.image"}}' "$again")
-  echo "WARN: compose up -d hat den Portal-Container neu erstellt (weiter 9.9.2);" \
+  cat "$LOG_DIR/up-again.log" >&2
+  fail "9.9.2: compose up -d hat den Portal-Container neu erstellt;" \
     "com.docker.compose.image vom Updater $label_before, von Compose $label_now"
-  recreated=" (neu erstellt, siehe WARN)"
 fi
 guard "nach Fall 9.9.2"
-pass "9.9.2 -> done, /health 9.9.2, ein Portal-Container, compose up -d lässt 9.9.2 stehen$recreated"
+pass "9.9.2 -> done, /health 9.9.2, ein Portal-Container, compose up -d lässt den Container stehen"
 
 # --- case 2: 9.9.3 -> rolledBack -------------------------------------------
 

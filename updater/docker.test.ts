@@ -75,6 +75,13 @@ describe("createDockerApi", () => {
     expect(seen[0].url).toBe("/v1.43/images/ghcr.io%2Fa%2Fb%3A1.2.3/json");
   });
 
+  it("inspectImage with manifests: asks for the per-platform manifests", async () => {
+    handler = (_req, res) => json(res, 200, { Id: "sha256:1", Config: { Labels: null }, Manifests: [] });
+    const info = await api().inspectImage("ghcr.io/a/b:1.2.3", { manifests: true });
+    expect(seen[0].url).toBe("/v1.43/images/ghcr.io%2Fa%2Fb%3A1.2.3/json?manifests=1");
+    expect(info.Manifests).toEqual([]);
+  });
+
   it("listContainers: filters as urlencoded JSON with label list", async () => {
     handler = (_req, res) => json(res, 200, [{ Id: "abc", Names: ["/portal"] }]);
     const list = await api().listContainers({
@@ -246,16 +253,22 @@ describe("API version negotiation", () => {
     };
   }
 
-  it("server newer than 1.47: uses /v1.47 and asks /version once", async () => {
+  it("server newer than 1.48: uses /v1.48 and asks /version once", async () => {
     versionServer("1.56");
     const docker = createDockerApi(socketPath);
     await docker.inspectContainer("abc");
     await docker.inspectContainer("abc");
     expect(seen.map((s) => s.url)).toEqual([
       "/version",
-      "/v1.47/containers/abc/json",
-      "/v1.47/containers/abc/json",
+      "/v1.48/containers/abc/json",
+      "/v1.48/containers/abc/json",
     ]);
+  });
+
+  it("server at 1.47: stays below the manifest data of 1.48", async () => {
+    versionServer("1.47");
+    await createDockerApi(socketPath).inspectContainer("abc");
+    expect(seen.map((s) => s.url)).toEqual(["/version", "/v1.47/containers/abc/json"]);
   });
 
   it("server older than 1.47: uses the server's version", async () => {

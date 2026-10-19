@@ -3,7 +3,7 @@
 // container was touched is undone, so the old version keeps running.
 import { compareVersions, isVersion, type UpdateRequest, type UpdateState, type UpdateStatus } from "../shared/update.ts";
 import type { ContainerInfo, DockerApi } from "./docker.ts";
-import { createSpec } from "./recreate.ts";
+import { composeImageLabel, createSpec } from "./recreate.ts";
 
 const DEFAULT_PORT = 3848;
 const STOP_TIMEOUT_SECONDS = 30;
@@ -13,6 +13,10 @@ const PREVIOUS_SUFFIX = "-vorher";
 const COMPOSE_PROJECT = "com.docker.compose.project";
 const COMPOSE_SERVICE = "com.docker.compose.service";
 const COMPOSE_IMAGE = "com.docker.compose.image";
+// The image reference from compose.yaml (e.g. ":latest"). The updater creates
+// the new container from "<repo>:<version>", so it keeps the original
+// reference here for the pin check and the retag of the next update.
+const REFERENCE_LABEL = "io.github.0x5j.tanss-agent-portal.reference";
 const MANUAL_UPDATE = "docker compose pull && docker compose up -d";
 const IN_PROGRESS: readonly UpdateState[] = ["pulling", "starting", "checking"];
 
@@ -40,6 +44,11 @@ function parseReference(ref: string): { repo: string; tag: string | null; digest
   const colon = ref.lastIndexOf(":");
   if (colon > ref.lastIndexOf("/")) return { repo: ref.slice(0, colon), tag: ref.slice(colon + 1), digest: false };
   return { repo: ref, tag: null, digest: false };
+}
+
+/** The reference compose started the portal with, also after earlier updates. */
+function composeReference(c: ContainerInfo): string {
+  return c.Config.Labels?.[REFERENCE_LABEL] || c.Config.Image;
 }
 
 /** IP of the container's primary network; empty while it has none yet. */
@@ -128,16 +137,17 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     const oldId = await deps.findPortal();
     old = await docker.inspectContainer(oldId);
     const oldImage = await docker.inspectImage(old.Image);
-    oldImageRef = old.Config.Image;
+    oldImageRef = composeReference(old);
     port = portalPort(old);
 
     const ip = containerIp(old);
     const running = ip ? await askHealth(deps, healthUrl(ip, port)) : null;
-    const tag = parseReference(oldImageRef).tag;
+    const imageTag = parseReference(old.Config.Image).tag;
     if (running && isVersion(running)) from = running;
-    else if (tag && isVersion(tag)) from = tag;
+    else if (imageTag && isVersion(imageTag)) from = imageTag;
 
     // A pinned version would be undone by the next `docker compose up -d`.
+    const tag = parseReference(oldImageRef).tag;
     if (tag && isVersion(tag)) {
       return report(
         "failed",
@@ -154,13 +164,18 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     } catch (err) {
       return report("failed", `Image ${imageRef} nicht ladbar: ${errorText(err)}`);
     }
-    const newImage = await docker.inspectImage(imageRef);
+    // The manifest list is only there (and only needed) when the daemon
+    // reports the container's platform manifest, i.e. API >= 1.48.
+    const newImage = old.ImageManifestDescriptor
+      ? await docker.inspectImage(imageRef, { manifests: true })
+      : await docker.inspectImage(imageRef);
 
     spec = createSpec(old, oldImage, imageRef);
-    if (old.Config.Labels && Object.hasOwn(old.Config.Labels, COMPOSE_IMAGE)) {
-      // Keeps `docker compose up -d` from seeing drift and recreating the container.
-      (spec.body as { Labels: Record<string, string> }).Labels[COMPOSE_IMAGE] = newImage.Id;
-    }
+    const labels = (spec.body as { Labels: Record<string, string> }).Labels;
+    labels[REFERENCE_LABEL] = oldImageRef;
+    // Keeps `docker compose up -d` from seeing drift and recreating the container.
+    const label = composeImageLabel(old, oldImage, newImage);
+    if (label !== undefined) labels[COMPOSE_IMAGE] = label;
   } catch (err) {
     return report("failed", errorText(err));
   }
@@ -352,7 +367,7 @@ export async function recoverInterrupted(
       const note = "nach Unterbrechung";
       if (!previous) return report("done", `Update auf ${to} abgeschlossen (${note})`);
       const old = await docker.inspectContainer(previous.Id);
-      return finish(deps, report, previous.Id, current.Config.Image, old.Config.Image, to, [note]);
+      return finish(deps, report, previous.Id, current.Config.Image, composeReference(old), to, [note]);
     }
 
     if (previous) {

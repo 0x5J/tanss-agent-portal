@@ -71,6 +71,7 @@ function fakeDocker(
     applyFailedRename?: boolean;
     oldRunning?: boolean;
     newRunning?: boolean;
+    newManifests?: ImageInfo["Manifests"];
   } = {},
 ) {
   const calls: Call[] = [];
@@ -103,10 +104,11 @@ function fakeDocker(
       record("listContainers", labels);
       return opts.list ?? [];
     },
-    async inspectImage(ref) {
-      record("inspectImage", ref);
+    async inspectImage(ref, o) {
+      if (o) record("inspectImage", ref, o);
+      else record("inspectImage", ref);
       if (ref === old.Image) return image("sha256:old-image");
-      return image(NEW_IMAGE_ID);
+      return o?.manifests ? { ...image(NEW_IMAGE_ID), Manifests: opts.newManifests ?? [] } : image(NEW_IMAGE_ID);
     },
     async pullImage(repo, tag) {
       record("pullImage", repo, tag);
@@ -235,13 +237,39 @@ describe("runUpdate", () => {
     expect(t.calls).toContainEqual(["inspectImage", `${REPO}:0.2.0`]);
   });
 
+  it("sets the compose image label to the new platform manifest on the containerd store", async () => {
+    const arm = { os: "linux", architecture: "arm64" };
+    const c = oldContainer();
+    const old: ContainerInfo = {
+      ...c,
+      Config: { ...c.Config, Labels: { ...c.Config.Labels, "com.docker.compose.image": "sha256:old-manifest" } },
+      ImageManifestDescriptor: { digest: "sha256:old-manifest", platform: arm },
+    };
+    const t = setup({
+      docker: fakeDocker({
+        old,
+        newManifests: [
+          { Kind: "image", Available: true, Descriptor: { digest: "sha256:new-amd64", platform: { os: "linux", architecture: "amd64" } } },
+          { Kind: "image", Available: true, Descriptor: { digest: "sha256:new-arm64", platform: arm } },
+        ],
+      }),
+    });
+    expect((await runUpdate(t.deps, REQUEST)).state).toBe("done");
+    const body = t.calls.find(([m]) => m === "createContainer")![2] as { Labels: Record<string, string> };
+    expect(body.Labels["com.docker.compose.image"]).toBe("sha256:new-arm64");
+    expect(t.calls).toContainEqual(["inspectImage", `${REPO}:0.2.0`, { manifests: true }]);
+  });
+
   it("does not add the compose image label when the old container had none", async () => {
     const t = setup({
       docker: fakeDocker({ old: oldContainer({ labels: { "com.docker.compose.project": "agent-portal" } }) }),
     });
     await runUpdate(t.deps, REQUEST);
     const body = t.calls.find(([m]) => m === "createContainer")![2] as { Labels: Record<string, string> };
-    expect(body.Labels).toEqual({ "com.docker.compose.project": "agent-portal" });
+    expect(body.Labels).toEqual({
+      "com.docker.compose.project": "agent-portal",
+      "io.github.0x5j.tanss-agent-portal.reference": `${REPO}:latest`,
+    });
   });
 
   it("uses PORT from the old container's environment", async () => {
@@ -268,6 +296,34 @@ describe("runUpdate", () => {
     });
     expect(mutating(t.calls)).toEqual([]);
     expect(t.reports).toEqual([result]);
+  });
+
+  it("remembers the compose reference on the new container", async () => {
+    const t = setup();
+    await runUpdate(t.deps, REQUEST);
+    const body = t.calls.find(([m]) => m === "createContainer")![2] as { Image: string; Labels: Record<string, string> };
+    expect(body.Image).toBe(`${REPO}:0.2.0`);
+    expect(body.Labels["io.github.0x5j.tanss-agent-portal.reference"]).toBe(`${REPO}:latest`);
+  });
+
+  it("updates a container the updater created itself, not taking its version tag for a pin", async () => {
+    const c = oldContainer({ image: `${REPO}:0.2.0` });
+    const old: ContainerInfo = {
+      ...c,
+      Config: {
+        ...c.Config,
+        Labels: { ...c.Config.Labels, "io.github.0x5j.tanss-agent-portal.reference": `${REPO}:latest` },
+      },
+    };
+    const t = setup({
+      docker: fakeDocker({ old }),
+      health: (url) => (url.includes(OLD_IP) ? "0.2.0" : url.includes(NEW_IP) ? "0.3.0" : null),
+    });
+    const result = await runUpdate(t.deps, { ...REQUEST, version: "0.3.0" });
+    expect(result).toMatchObject({ state: "done", from: "0.2.0", to: "0.3.0" });
+    expect(t.calls).toContainEqual(["tagImage", `${REPO}:0.3.0`, REPO, "latest"]);
+    const body = t.calls.find(([m]) => m === "createContainer")![2] as { Labels: Record<string, string> };
+    expect(body.Labels["io.github.0x5j.tanss-agent-portal.reference"]).toBe(`${REPO}:latest`);
   });
 
   it("takes from from the pinned tag when the old health check fails", async () => {

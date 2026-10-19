@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ContainerInfo, ImageInfo } from "./docker.ts";
-import { createSpec } from "./recreate.ts";
+import { composeImageLabel, createSpec } from "./recreate.ts";
 
 const FULL_ID = "3f4c9a1b2d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718";
 const SHORT_ID = FULL_ID.slice(0, 12);
@@ -259,5 +259,78 @@ describe("createSpec", () => {
     expect(old).toEqual(oldCopy);
     expect(image).toEqual(imageCopy);
     expect(bodyOf(spec).HostConfig).not.toBe(old.HostConfig);
+  });
+});
+
+describe("composeImageLabel", () => {
+  const ARM = { os: "linux", architecture: "arm64" };
+  const AMD = { os: "linux", architecture: "amd64" };
+  const OLD_MANIFEST = "sha256:old-arm64-manifest";
+
+  function container(label: string, descriptor?: ContainerInfo["ImageManifestDescriptor"]): ContainerInfo {
+    const c = oldContainer();
+    return {
+      ...c,
+      Image: "sha256:old-index",
+      Config: { ...c.Config, Labels: { ...c.Config.Labels, "com.docker.compose.image": label } },
+      ...(descriptor ? { ImageManifestDescriptor: descriptor } : {}),
+    };
+  }
+
+  function image(id: string, manifests?: ImageInfo["Manifests"]): ImageInfo {
+    return { Id: id, Config: { Env: null, Labels: null }, ...(manifests ? { Manifests: manifests } : {}) };
+  }
+
+  const NEW_MANIFESTS: ImageInfo["Manifests"] = [
+    { Kind: "image", Available: true, Descriptor: { digest: "sha256:new-amd64-manifest", platform: AMD } },
+    { Kind: "image", Available: true, Descriptor: { digest: "sha256:new-arm64-manifest", platform: ARM } },
+    {
+      Kind: "attestation",
+      Available: true,
+      Descriptor: { digest: "sha256:new-attestation", platform: { os: "unknown", architecture: "unknown" } },
+    },
+  ];
+
+  it("containerd store: follows the platform manifest digest of the new image", () => {
+    const old = container(OLD_MANIFEST, { digest: OLD_MANIFEST, platform: ARM });
+    expect(
+      composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index", NEW_MANIFESTS)),
+    ).toBe("sha256:new-arm64-manifest");
+  });
+
+  it("containerd store: skips a manifest of the right platform that is not available", () => {
+    const old = container(OLD_MANIFEST, { digest: OLD_MANIFEST, platform: ARM });
+    const manifests: ImageInfo["Manifests"] = [
+      { Kind: "image", Available: false, Descriptor: { digest: "sha256:missing", platform: ARM } },
+      { Kind: "image", Available: true, Descriptor: { digest: "sha256:new-amd64-manifest", platform: AMD } },
+    ];
+    expect(composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index", manifests))).toBe(OLD_MANIFEST);
+  });
+
+  it("containerd store: matches the platform variant", () => {
+    const v7 = { os: "linux", architecture: "arm", variant: "v7" };
+    const old = container(OLD_MANIFEST, { digest: OLD_MANIFEST, platform: v7 });
+    const manifests: ImageInfo["Manifests"] = [
+      { Kind: "image", Available: true, Descriptor: { digest: "sha256:v6", platform: { ...v7, variant: "v6" } } },
+      { Kind: "image", Available: true, Descriptor: { digest: "sha256:v7", platform: v7 } },
+    ];
+    expect(composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index", manifests))).toBe("sha256:v7");
+  });
+
+  it("classic store: follows the image id", () => {
+    const old = container("sha256:old-index");
+    expect(composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index"))).toBe("sha256:new-index");
+  });
+
+  it("classic store with manifest data (API 1.48): still follows the image id", () => {
+    const old = container("sha256:old-index", { digest: "sha256:old-config", platform: ARM });
+    expect(composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index", []))).toBe("sha256:new-index");
+  });
+
+  it("leaves a label it does not recognise unchanged", () => {
+    const old = container("sha256:something-else", { digest: OLD_MANIFEST, platform: ARM });
+    expect(
+      composeImageLabel(old, image("sha256:old-index"), image("sha256:new-index", NEW_MANIFESTS)),
+    ).toBe("sha256:something-else");
   });
 });
