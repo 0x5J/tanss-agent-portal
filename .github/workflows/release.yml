@@ -1,9 +1,10 @@
 name: Release
 
-# Ein Tag vX.Y.Z baut beide Images (Portal und Updater) auf ghcr.io mit den
-# Tags X.Y.Z und staging und legt ein GitHub-Pre-Release mit dem passenden
-# Abschnitt aus CHANGELOG.md an. latest und X.Y setzt erst promote.yml, wenn
-# das Pre-Release freigegeben wird.
+# Ein Tag vX.Y.Z baut beide Images (Portal und Updater) auf ghcr.io mit dem
+# Tag X.Y.Z und legt ein GitHub-Pre-Release mit dem passenden Abschnitt aus
+# CHANGELOG.md sowie compose.yaml und env.example an. staging rueckt nur nach,
+# wenn der Tag die hoechste Version ist. latest und X.Y setzt erst
+# promote.yml, wenn das Pre-Release freigegeben wird.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -25,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # all tags, to tell whether this one is the highest version
+          fetch-depth: 0
 
       - name: Tag, package.json und Changelog abgleichen
         id: version
@@ -46,6 +50,18 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: staging nur fuer die hoechste Version
+        id: staging
+        run: |
+          git fetch --force --tags origin
+          highest="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)"
+          if [ "$highest" = "$GITHUB_REF_NAME" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_REF_NAME ist nicht die hoechste Version ($highest): staging bleibt"
+            echo "move=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -64,9 +80,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=staging
+            type=raw,value=staging,enable=${{ steps.staging.outputs.move == 'true' }}
           labels: |
             org.opencontainers.image.title=Agent-Portal für TANSS
             org.opencontainers.image.licenses=MIT
@@ -84,9 +101,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_UPDATER }}
+          flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=staging
+            type=raw,value=staging,enable=${{ steps.staging.outputs.move == 'true' }}
           labels: |
             org.opencontainers.image.title=Agent-Portal für TANSS (Updater)
             org.opencontainers.image.licenses=MIT
@@ -106,9 +124,14 @@ jobs:
       - name: GitHub-Release anlegen
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME"
-          --verify-tag
-          --prerelease
-          --title "${{ steps.version.outputs.version }}"
-          --notes-file "$RUNNER_TEMP/notes.md"
+          VERSION: ${{ steps.version.outputs.version }}
+        # GitHub renames asset names with a leading dot, so the .env template
+        # goes up as env.example.
+        run: |
+          cp .env.example "$RUNNER_TEMP/env.example"
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --prerelease \
+            --title "$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            compose.yaml "$RUNNER_TEMP/env.example"
