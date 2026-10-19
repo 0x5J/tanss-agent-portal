@@ -1,7 +1,9 @@
 name: Release
 
-# Ein Tag vX.Y.Z veröffentlicht genau diese Version: Image auf ghcr.io und
-# GitHub-Release mit dem passenden Abschnitt aus CHANGELOG.md.
+# Ein Tag vX.Y.Z baut beide Images (Portal und Updater) auf ghcr.io mit den
+# Tags X.Y.Z und staging und legt ein GitHub-Pre-Release mit dem passenden
+# Abschnitt aus CHANGELOG.md an. latest und X.Y setzt erst promote.yml, wenn
+# das Pre-Release freigegeben wird.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -16,6 +18,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/0x5j/tanss-agent-portal
+  IMAGE_UPDATER: ghcr.io/0x5j/tanss-agent-portal-updater
 
 jobs:
   release:
@@ -62,9 +65,8 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=staging
           labels: |
             org.opencontainers.image.title=Agent-Portal für TANSS
             org.opencontainers.image.licenses=MIT
@@ -75,8 +77,31 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=portal
+          cache-to: type=gha,mode=max,scope=portal
+
+      - id: meta-updater
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_UPDATER }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=staging
+          labels: |
+            org.opencontainers.image.title=Agent-Portal für TANSS (Updater)
+            org.opencontainers.image.licenses=MIT
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: updater/Dockerfile
+          build-args: |
+            UPDATER_VERSION=${{ steps.version.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-updater.outputs.tags }}
+          labels: ${{ steps.meta-updater.outputs.labels }}
+          cache-from: type=gha,scope=updater
+          cache-to: type=gha,mode=max,scope=updater
 
       - name: GitHub-Release anlegen
         env:
@@ -84,5 +109,6 @@ jobs:
         run: >
           gh release create "$GITHUB_REF_NAME"
           --verify-tag
+          --prerelease
           --title "${{ steps.version.outputs.version }}"
           --notes-file "$RUNNER_TEMP/notes.md"

@@ -16,17 +16,38 @@ Container. Der Browser spricht nie selbst mit TANSS.
 ## Voraussetzungen
 
 - eine TANSS-Instanz mit freigeschalteter REST-API und ein eigenes Konto
-- Docker (mit Compose) oder Node.js ≥ 22
+- Docker mit Compose (Docker Desktop unter Windows und macOS) — für den
+  Betrieb weder Git noch Node.js; Node.js ≥ 22 nur für die Entwicklung
 - optional: ein OpenAI-kompatibler LLM-Endpoint (oMLX, Ollama, LM Studio, vLLM)
   für die KI-Funktionen
 - optional: ein persönlicher Linear-API-Key für den Tagesimport
 
-## Start
+## Installation
+
+Es braucht nur einen Ordner mit zwei Dateien, `compose.yaml` und `.env`. Die
+fertigen Images kommen von `ghcr.io`, ein Klon des Repos ist nicht nötig.
 
 ```bash
-cp .env.example .env          # TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
+mkdir agent-portal && cd agent-portal
+curl -LO https://raw.githubusercontent.com/0x5J/tanss-agent-portal/main/compose.yaml
+curl -L https://raw.githubusercontent.com/0x5J/tanss-agent-portal/main/.env.example -o .env
+# .env anpassen: TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
 chmod 600 .env
-docker compose up -d --build  # http://127.0.0.1:3848
+docker compose up -d          # http://127.0.0.1:3848
+```
+
+Unter Windows (Docker Desktop, PowerShell) laden `Invoke-WebRequest <url> -OutFile
+compose.yaml` und `Invoke-WebRequest <url> -OutFile .env` dieselben Dateien;
+`chmod` entfällt. Wer die Dateien lieber im Browser holt, nimmt auf GitHub die
+Ansicht „Raw". Unter macOS und Linux läuft es genauso. Das Portal hört nur auf
+`127.0.0.1`; `HOST_PORT` in der `.env` ändert den Port.
+
+Entwicklungs-Build aus dem Quellcode (im Klon des Repos, baut beide Images
+lokal):
+
+```bash
+cp .env.example .env
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
 
 Entwicklung ohne Container:
@@ -36,6 +57,54 @@ npm install
 npm run dev      # API auf :3848, Oberfläche auf :5173
 npm run check    # Typen + Tests
 ```
+
+## Updates
+
+Ist eine neuere Version freigegeben, zeigt das Portal ein Banner mit „Jetzt
+aktualisieren". Der Klick beauftragt den **Updater**, einen zweiten Container
+neben dem Portal: Er zieht das neue Image, ersetzt den Portal-Container, wartet
+auf `/health` mit der neuen Version und stellt bei einem Fehler die alte Version
+wieder her. Den Stand zeigt das Banner; danach lädt die Seite neu.
+
+Der Updater ist der einzige Dienst mit Docker-Zugriff (Socket) und hat keine
+Ports. Das Portal selbst bekommt keine Docker-Rechte und reicht nur eine
+Versionsnummer weiter.
+
+- **Ohne Updater** (oder von Hand): `docker compose pull && docker compose up -d`.
+- Den Updater selbst aktualisiert nur dieser Handgriff; das
+  [Changelog](CHANGELOG.md) nennt, wann das nötig ist.
+- Eine feste `PORTAL_TAG` (z. B. `0.2.0`) verschiebt der Updater nie. Mit
+  `latest` oder `staging` läuft der Container nach dem Update auf der neuen
+  Version weiter.
+- `UPDATE_CHECK=0` schaltet die Abfrage bei GitHub ab (kein Banner).
+- `UPDATE_CHANNEL=staging` zeigt auch Pre-Releases an (siehe Staging).
+
+## Staging
+
+Neue Versionen lassen sich vor der Freigabe in einer zweiten Instanz testen:
+zweiter Ordner mit derselben `compose.yaml`, eigener `.env` und eigenem
+`data/` (also auch eigene Anmeldung). In die `.env` des Staging-Ordners:
+
+```
+COMPOSE_PROJECT_NAME=agent-portal-staging
+HOST_PORT=3849
+PORTAL_TAG=staging
+UPDATE_CHANNEL=staging
+```
+
+> **Achtung:** Staging spricht das TANSS an, das in seiner `.env` steht. Ohne
+> separates Testsystem sind das echte Daten.
+
+## Umstieg von 0.1.0
+
+Die alte `compose.yaml` baute das Image lokal und vergab den Containernamen
+`agent-portal`. So wechselst du auf die Images:
+
+1. Im alten Ordner `docker compose down`.
+2. `compose.yaml` durch die neue ersetzen; `.env` und `data/` bleiben.
+3. `docker compose up -d`.
+
+Die Container heißen jetzt nach dem Projekt, z. B. `agent-portal-portal-1`.
 
 ## Anmeldung
 
@@ -74,7 +143,7 @@ auch Kopien davon (der Server zählt dafür je Konto eine Generation in
 > Container an — hier hat das eine automatische Anmeldung mit falschem
 > Passwort erzeugt und damit ein TANSS-Konto gesperrt. Also
 > `TANSS_PASSWORD='...'` schreiben und einmal nachsehen:
-> `docker exec agent-portal sh -c 'printf "%s" "$TANSS_PASSWORD" | wc -c'`
+> `docker compose exec portal sh -c 'printf "%s" "$TANSS_PASSWORD" | wc -c'`
 > muss dieselbe Länge liefern wie der Wert in der Datei.
 
 **Optionaler Rückfall.** Sind `TANSS_USERNAME` und `TANSS_PASSWORD` gesetzt
@@ -146,6 +215,7 @@ server/   Fastify-Routen (app.ts, agent.ts), TANSS-Client, geteilte Sitzung, Anm
           Dashboard-Sammler, LLM-Client, Store, TOTP, Protokoll
 shared/   reine Logik: Ticketzeilen, Thread, Tageszeitleiste, Berlin-Zeit, Agent-Prompts/-Fakten
 src/      React-Oberfläche; Tokens aus dem Artboard in styles/app.css
+updater/  eigener Container für Ein-Klick-Updates (nur Node-Bordmittel, Docker-Socket)
 docs/     Design-Artboard
 ```
 
@@ -157,6 +227,8 @@ docs/     Design-Artboard
 | `TOTP_SECRET` | optional, erzeugt den 2FA-Code serverseitig |
 | `TANSS_USERNAME`, `TANSS_PASSWORD` | optional (nur zusammen), standardmäßig leer: Rückfall-Anmeldung ohne Menschen. Der Sammler braucht sie nicht |
 | `TANSS_TICKET_URL` | optional, Link „In TANSS öffnen" |
+| `UPDATE_CHANNEL`, `UPDATE_CHECK` | `stable` (Standard) oder `staging`; `UPDATE_CHECK=0` schaltet die Update-Abfrage ab |
+| `PORTAL_TAG`, `HOST_PORT`, `COMPOSE_PROJECT_NAME` | nur für Compose: Image-Tag, Port auf dem Host, Projektname |
 | `PORT`, `BIND` | Standard 3848 / 127.0.0.1 (Container: 0.0.0.0 + `ALLOW_ALL_INTERFACES=1`) |
 | `DEBUG_TANSS=1` | alle TANSS-Aufrufe auf die Konsole |
 
@@ -164,9 +236,11 @@ docs/     Design-Artboard
 
 Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/). Die
 laufende Version steht in den Einstellungen und in der Antwort von `/health`,
-die Änderungen je Version in [CHANGELOG.md](CHANGELOG.md). Zu jedem Release
-gibt es ein fertiges Image für amd64 und arm64:
-`ghcr.io/0x5j/tanss-agent-portal:<version>` (dazu `latest` und `<major>.<minor>`).
+die Änderungen je Version in [CHANGELOG.md](CHANGELOG.md). Zu jeder Version
+gibt es fertige Images für amd64 und arm64, für das Portal
+(`ghcr.io/0x5j/tanss-agent-portal`) und den Updater
+(`ghcr.io/0x5j/tanss-agent-portal-updater`). `latest` und `<major>.<minor>`
+zeigen immer auf die zuletzt freigegebene Version.
 
 Eine neue Version veröffentlichen:
 
@@ -176,10 +250,20 @@ Eine neue Version veröffentlichen:
 2. `npm version X.Y.Z --no-git-tag-version` setzt die Version in
    `package.json` und `package-lock.json`.
 3. Committen, `git tag vX.Y.Z`, Branch und Tag pushen.
+4. `release.yml` prüft, dass Tag, `package.json` und Changelog zusammenpassen,
+   führt Typen und Tests aus, baut beide Images mit den Tags `<version>` und
+   `staging` und legt ein **Pre-Release** mit dem Changelog-Abschnitt an. `latest`
+   bleibt unverändert; Instanzen auf `stable` sehen die Version noch nicht.
+5. Auf der Staging-Instanz testen (Update per Banner oder
+   `docker compose pull && docker compose up -d`).
+6. Freigeben: in GitHub am Release den Haken „Pre-release" entfernen oder
+   `gh release edit vX.Y.Z --prerelease=false --latest`. `promote.yml` setzt
+   `latest` und `X.Y` auf denselben Image-Digest wie `X.Y.Z` (nichts wird neu
+   gebaut); danach sehen Live-Instanzen das Update. Notfalls lässt sich der
+   Workflow mit der Version von Hand starten.
 
-Der Workflow `release.yml` bricht ab, wenn Tag, `package.json` und Changelog
-nicht zusammenpassen. Sonst prüft er Typen und Tests, baut und veröffentlicht
-das Image und legt das GitHub-Release mit dem Changelog-Abschnitt als Text an.
+Ein Fehler in einer getesteten Version wird nicht nachträglich überschrieben:
+beheben und die nächste Patch-Version veröffentlichen.
 
 ## Lizenz
 

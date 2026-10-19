@@ -1,0 +1,14 @@
+# Entwicklung: baut beide Images lokal statt sie von ghcr.io zu laden.
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+services:
+  portal:
+    build:
+      context: .
+    image: agent-portal:dev
+  updater:
+    build:
+      context: .
+      dockerfile: updater/Dockerfile
+      args:
+        UPDATER_VERSION: dev
+    image: agent-portal-updater:dev

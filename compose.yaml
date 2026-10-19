@@ -1,8 +1,6 @@
 services:
   portal:
-    build: .
-    image: agent-portal
-    container_name: agent-portal
+    image: ghcr.io/0x5j/tanss-agent-portal:${PORTAL_TAG:-latest}
     restart: unless-stopped
     # TANSS_BASE_URL, SESSION_SECRET und optional TOTP_SECRET kommen zur
     # Laufzeit aus der lokalen .env und landen nicht im Image.
@@ -23,6 +21,19 @@ services:
       - "host.docker.internal:host-gateway"
     # Loopback only: aus dem Netz ist nichts erreichbar.
     ports:
-      - "127.0.0.1:3848:3848"
+      - "127.0.0.1:${HOST_PORT:-3848}:3848"
+    security_opt:
+      - no-new-privileges:true
+
+  # Spielt Updates ein: zieht das neue Image und startet den Portal-Container
+  # neu. Einziger Dienst mit Docker-Zugriff (Socket) und ohne Ports. Das
+  # Portal selbst hat keinen Docker-Zugriff und reicht nur eine Versionsnummer
+  # ueber ./data/update weiter.
+  updater:
+    image: ghcr.io/0x5j/tanss-agent-portal-updater:${PORTAL_TAG:-latest}
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/update:/update
     security_opt:
       - no-new-privileges:true

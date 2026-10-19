@@ -6,6 +6,32 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Update-Prüfung mit Banner: Das Portal fragt GitHub nach neuen Releases
+  (`UPDATE_CHECK=0` schaltet das ab) und zeigt in den Einstellungen den Stand.
+- Ein-Klick-Update über einen eigenen Updater-Container, der das neue Image
+  zieht, den Portal-Container ersetzt und bei einem Fehler zurückrollt.
+- Staging-Kanal (`UPDATE_CHANNEL=staging`, `PORTAL_TAG=staging`) für Tests vor
+  der Freigabe.
+- Fertige Images für beide Dienste (Portal und Updater) auf `ghcr.io`;
+  `compose.build.yaml` baut sie für die Entwicklung lokal.
+- Installation ohne Git und Node.js: ein Ordner mit `compose.yaml` und `.env`.
+
+### Geändert
+
+- `compose.yaml` nutzt die fertigen Images statt lokal zu bauen und vergibt
+  keinen festen Containernamen mehr; Port und Tag sind über `HOST_PORT` und
+  `PORTAL_TAG` einstellbar. Umstieg siehe README.
+- Neue Versionen erscheinen zuerst als Pre-Release; `latest` wird erst bei der
+  Freigabe gesetzt.
+
+### Sicherheit
+
+- Der Updater ist der einzige Dienst mit Docker-Zugriff; das Portal reicht nur
+  eine Versionsnummer weiter.
+- Der Dateiaustausch zwischen Portal und Updater ist gegen Symlinks gehärtet.
+
 ## [0.1.0] – 2026-10-19
 
 Erste öffentliche Version.

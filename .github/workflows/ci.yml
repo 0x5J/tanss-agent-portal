@@ -20,3 +20,27 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+
+  # Baut beide Images, damit ein kaputtes Dockerfile vor dem Release auffaellt.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Portal-Image bauen
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=portal
+      - name: Updater-Image bauen
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: updater/Dockerfile
+          build-args: |
+            UPDATER_VERSION=ci
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=updater

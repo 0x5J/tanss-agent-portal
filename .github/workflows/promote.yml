@@ -1,0 +1,62 @@
+name: Promote
+
+# Gibt eine getestete Version frei: Sobald ein Pre-Release in GitHub zum
+# Release gemacht wird (Haken "Pre-release" entfernt), zeigen latest und X.Y
+# auf genau dieselben Images (Digest) wie X.Y.Z -- es wird nichts neu gebaut.
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version ohne v, z. B. 0.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/0x5j/tanss-agent-portal
+  IMAGE_UPDATER: ghcr.io/0x5j/tanss-agent-portal-updater
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Version bestimmen
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          raw="${RELEASE_TAG:-$INPUT_VERSION}"
+          version="${raw#v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$raw' ist keine Version der Form X.Y.Z"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags latest und X.Y setzen
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MINOR: ${{ steps.version.outputs.minor }}
+        run: |
+          for image in "$IMAGE" "$IMAGE_UPDATER"; do
+            docker buildx imagetools create \
+              -t "$image:latest" -t "$image:$MINOR" "$image:$VERSION"
+          done
