@@ -97,9 +97,13 @@ function inProgress(status: UpdateStatus | null, now: number): boolean {
   );
 }
 
-/** An update is under way: a request is open, or the updater is still working. */
+/**
+ * An update is under way: a request is open, or the updater is still working.
+ * A request nobody picked up for UPDATE_STALE_MS no longer blocks a new one.
+ */
 export function isBusy(o: Pick<UpdateOverview, "requested" | "status">, now: number): boolean {
-  return o.requested !== null || inProgress(o.status, now);
+  const open = o.requested !== null && now - o.requested.requestedAt < UPDATE_STALE_MS;
+  return open || inProgress(o.status, now);
 }
 
 function progressText(status: UpdateStatus): string {

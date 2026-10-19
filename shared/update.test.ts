@@ -77,6 +77,23 @@ describe("isBusy", () => {
     expect(isBusy({ requested, status: null }, NOW)).toBe(true);
   });
 
+  it("stops counting a request the updater never picked up after ten minutes", () => {
+    const requested = { id: "u1", version: "0.2.0", requestedAt: NOW - 11 * MIN };
+    expect(isBusy({ requested, status: null }, NOW)).toBe(false);
+    expect(isBusy({ requested: { ...requested, requestedAt: NOW - 9 * MIN }, status: null }, NOW)).toBe(true);
+  });
+
+  it("offers the release again instead of a stale request", () => {
+    const banner = updateBanner(
+      overview({
+        latest: release("0.2.0"),
+        requested: { id: "u2", version: "0.2.0", requestedAt: NOW - 11 * MIN },
+      }),
+      NOW,
+    );
+    expect(banner).toMatchObject({ tone: "info", action: "update" });
+  });
+
   it("is busy while the updater reports progress", () => {
     for (const state of ["pulling", "starting", "checking"] as const) {
       const s = status({ state, at: NOW - MIN });
