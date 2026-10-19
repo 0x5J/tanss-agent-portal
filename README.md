@@ -24,23 +24,43 @@ Container. Der Browser spricht nie selbst mit TANSS.
 
 ## Installation
 
-Es braucht nur einen Ordner mit zwei Dateien, `compose.yaml` und `.env`. Die
+Es braucht nur einen Ordner mit `compose.yaml`, `.env` und `data/update/`. Die
 fertigen Images kommen von `ghcr.io`, ein Klon des Repos ist nicht nötig.
+`compose.yaml` und die Vorlage der `.env` hängen an jedem Release;
+`releases/latest` zeigt immer auf die zuletzt freigegebene Version, nie auf ein
+Pre-Release. Die Vorlage heißt dort `env.example` (GitHub entfernt den Punkt am
+Anfang von Dateinamen).
+
+macOS und Linux:
 
 ```bash
-mkdir agent-portal && cd agent-portal
-curl -LO https://raw.githubusercontent.com/0x5J/tanss-agent-portal/main/compose.yaml
-curl -L https://raw.githubusercontent.com/0x5J/tanss-agent-portal/main/.env.example -o .env
+mkdir -p tanss-agent-portal/data/update && cd tanss-agent-portal
+curl -fLO https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml
+curl -fL -o .env.example https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example
+cp .env.example .env
 # .env anpassen: TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
 chmod 600 .env
 docker compose up -d          # http://127.0.0.1:3848
 ```
 
-Unter Windows (Docker Desktop, PowerShell) laden `Invoke-WebRequest <url> -OutFile
-compose.yaml` und `Invoke-WebRequest <url> -OutFile .env` dieselben Dateien;
-`chmod` entfällt. Wer die Dateien lieber im Browser holt, nimmt auf GitHub die
-Ansicht „Raw". Unter macOS und Linux läuft es genauso. Das Portal hört nur auf
-`127.0.0.1`; `HOST_PORT` in der `.env` ändert den Port.
+Unter Linux läuft das Portal im Container als uid 1000. Hat der eigene
+Benutzer eine andere uid (`id -u`), einmal `sudo chown -R 1000:1000 data`
+ausführen — sonst kann das Portal nichts speichern, und der Updater lehnt
+`data/update` ab (er nimmt nur Ordner von root oder uid 1000).
+
+Windows (Docker Desktop, PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force -Path tanss-agent-portal\data\update | Out-Null
+Set-Location tanss-agent-portal
+Invoke-WebRequest -Uri https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml -OutFile compose.yaml
+Invoke-WebRequest -Uri https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example -OutFile .env.example
+Copy-Item .env.example .env
+notepad .env    # TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
+docker compose up -d
+```
+
+Das Portal hört nur auf `127.0.0.1`; `HOST_PORT` in der `.env` ändert den Port.
 
 Entwicklungs-Build aus dem Quellcode (im Klon des Repos, baut beide Images
 lokal):
@@ -49,6 +69,9 @@ lokal):
 cp .env.example .env
 docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
+
+Ein Ein-Klick-Update ersetzt auch hier das lokal gebaute Portal durch das
+Release-Image.
 
 Entwicklung ohne Container:
 
@@ -109,8 +132,19 @@ Oder einfach `docker compose up -d`: Compose erstellt das Portal dann aus der
 ## Staging
 
 Neue Versionen lassen sich vor der Freigabe in einer zweiten Instanz testen:
-zweiter Ordner mit derselben `compose.yaml`, eigener `.env` und eigenem
-`data/` (also auch eigene Anmeldung). In die `.env` des Staging-Ordners:
+zweiter Ordner mit eigener `compose.yaml`, eigener `.env` und eigenem `data/`
+(also auch eigene Anmeldung). Die Dateien kommen vom Pre-Release selbst, z. B.
+für `vX.Y.Z`:
+
+```bash
+mkdir -p tanss-agent-portal-staging/data/update && cd tanss-agent-portal-staging
+curl -fLO https://github.com/0x5J/tanss-agent-portal/releases/download/vX.Y.Z/compose.yaml
+curl -fL -o .env.example https://github.com/0x5J/tanss-agent-portal/releases/download/vX.Y.Z/env.example
+cp .env.example .env
+```
+
+Unter Windows dieselben Adressen mit `Invoke-WebRequest` wie bei der
+Installation. In die `.env` des Staging-Ordners:
 
 ```
 COMPOSE_PROJECT_NAME=agent-portal-staging
@@ -125,11 +159,15 @@ UPDATE_CHANNEL=staging
 ## Umstieg von 0.1.0
 
 Die alte `compose.yaml` baute das Image lokal und vergab den Containernamen
-`agent-portal`. So wechselst du auf die Images:
+`agent-portal`. So wechselst du auf die Images (erst möglich, sobald 0.2.0 als
+stabile Version freigegeben ist — vorher liefert `releases/latest` noch keine
+`compose.yaml`):
 
-1. Im alten Ordner `docker compose down`.
-2. `compose.yaml` durch die neue ersetzen; `.env` und `data/` bleiben.
-3. `docker compose up -d`.
+1. Im alten Ordner `compose.yaml` durch die aktuelle ersetzen (Download wie
+   unter Installation); `.env` und `data/` bleiben.
+2. `docker compose pull`
+3. `docker compose up -d` — ohne vorheriges `docker compose down`: Compose
+   ersetzt den alten Container `agent-portal` selbst.
 
 Die Container heißen jetzt nach dem Projekt, z. B. `agent-portal-portal-1`.
 
@@ -278,9 +316,12 @@ Eine neue Version veröffentlichen:
    `package.json` und `package-lock.json`.
 3. Committen, `git tag vX.Y.Z`, Branch und Tag pushen.
 4. `release.yml` prüft, dass Tag, `package.json` und Changelog zusammenpassen,
-   führt Typen und Tests aus, baut beide Images mit den Tags `<version>` und
-   `staging` und legt ein **Pre-Release** mit dem Changelog-Abschnitt an. `latest`
-   bleibt unverändert; Instanzen auf `stable` sehen die Version noch nicht.
+   führt Typen und Tests aus, baut beide Images mit dem Tag `<version>` und
+   legt ein **Pre-Release** mit dem Changelog-Abschnitt und den Dateien
+   `compose.yaml` und `env.example` an. `staging` rückt nur nach, wenn der Tag
+   die höchste Version ist (ein Patch für eine ältere Reihe verschiebt es
+   nicht). `latest` bleibt unverändert; Instanzen auf `stable` sehen die
+   Version noch nicht.
 5. Auf der Staging-Instanz testen (Update per Banner oder
    `docker compose pull && docker compose up -d`).
 6. Freigeben: in GitHub am Release den Haken „Pre-release" entfernen oder
