@@ -65,14 +65,20 @@ let lastState = "";
 /** Set once adoptDir() accepted the folder; nothing is written into it before. */
 let adopted = false;
 
-function report(status: UpdateStatus): void {
-  if (adopted) {
-    try {
-      writeJsonAtomic(dir, STATUS_FILE, status);
-    } catch (err) {
-      log(`status.json nicht schreibbar: ${err instanceof Error ? err.message : String(err)}`);
-    }
+/** The recovery outcome while the folder is rejected; serve() writes it once adopted. */
+let pendingStatus: UpdateStatus | null = null;
+
+function storeStatus(status: UpdateStatus): void {
+  try {
+    writeJsonAtomic(dir, STATUS_FILE, status);
+  } catch (err) {
+    log(`status.json nicht schreibbar: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+function report(status: UpdateStatus): void {
+  if (adopted) storeStatus(status);
+  else pendingStatus = status;
   if (status.state !== lastState) {
     lastState = status.state;
     log(`Update auf ${status.to}: ${status.state}${status.message ? ` (${status.message})` : ""}`);
@@ -148,6 +154,11 @@ function serve(): void {
   if (!adopted) {
     timer = setTimeout(serve, DIR_RECHECK_MS);
     return;
+  }
+  // Otherwise the portal would keep showing the interrupted update as running.
+  if (pendingStatus) {
+    storeStatus(pendingStatus);
+    pendingStatus = null;
   }
   log(`Updater ${version} bereit, Portal-Image ${repo}`);
   tick();
