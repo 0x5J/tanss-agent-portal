@@ -160,6 +160,27 @@ docs/     Design-Artboard
 | `PORT`, `BIND` | Standard 3848 / 127.0.0.1 (Container: 0.0.0.0 + `ALLOW_ALL_INTERFACES=1`) |
 | `DEBUG_TANSS=1` | alle TANSS-Aufrufe auf die Konsole |
 
+## Versionen und Releases
+
+Versionsnummern folgen [Semantic Versioning](https://semver.org/lang/de/). Die
+laufende Version steht in den Einstellungen und in der Antwort von `/health`,
+die Änderungen je Version in [CHANGELOG.md](CHANGELOG.md). Zu jedem Release
+gibt es ein fertiges Image für amd64 und arm64:
+`ghcr.io/0x5j/tanss-agent-portal:<version>` (dazu `latest` und `<major>.<minor>`).
+
+Eine neue Version veröffentlichen:
+
+1. In `CHANGELOG.md` die Einträge unter „Unveröffentlicht" in einen neuen
+   Abschnitt `## [X.Y.Z] – JJJJ-MM-TT` verschieben und die Vergleichslinks am
+   Ende nachziehen.
+2. `npm version X.Y.Z --no-git-tag-version` setzt die Version in
+   `package.json` und `package-lock.json`.
+3. Committen, `git tag vX.Y.Z`, Branch und Tag pushen.
+
+Der Workflow `release.yml` bricht ab, wenn Tag, `package.json` und Changelog
+nicht zusammenpassen. Sonst prüft er Typen und Tests, baut und veröffentlicht
+das Image und legt das GitHub-Release mit dem Changelog-Abschnitt als Text an.
+
 ## Lizenz
 
 [MIT](LICENSE)

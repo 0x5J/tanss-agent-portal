@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM node:22-slim AS build
+# Das Bundle ist plattformunabhängig: einmal nativ bauen statt je Zielplattform emuliert.
+FROM --platform=$BUILDPLATFORM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -19,6 +20,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY shared ./shared
 COPY --from=build /app/dist ./dist
+# Sitzung, Einstellungen und Berichte. Compose hängt hier ./data ein; ohne
+# Volume muss der Ordner trotzdem existieren und dem Laufzeitnutzer gehören.
+ENV DATA_DIR=/app/data
+RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3848
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

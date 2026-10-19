@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "./app.ts";
 import { parseTotpConfig, generateTotp } from "./totp.ts";
@@ -110,6 +111,16 @@ describe("login", () => {
     expect(sent).toMatch(/^\d{6}$/);
     expect(sent).toBe(generateTotp(parseTotpConfig("JBSWY3DPEHPK3PXP"), Date.now()));
     expect((await app.inject({ method: "GET", url: "/auth/config" })).json().tokenRequired).toBe(false);
+  });
+});
+
+describe("health", () => {
+  it("names the running version, straight from package.json", async () => {
+    const { client } = fakeTanss();
+    const app = await buildApp({ sessionSecret: SECRET, tanss: client, enableRateLimit: false });
+    const res = await app.inject({ method: "GET", url: "/health" });
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    expect(res.json()).toEqual({ ok: true, version: pkg.version });
   });
 });
 

@@ -234,6 +234,14 @@ export function SettingsView(props: Props) {
         <span>· Zeiten: Lücke erklären → Buchungsvorschlag in den Freigaben.</span>
         <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen in den Freigaben.</span>
       </div>
+
+      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Version</h2>
+      <p className="small muted">
+        Agent-Portal {__APP_VERSION__} ·{" "}
+        <a href="https://github.com/0x5J/tanss-agent-portal/releases" target="_blank" rel="noreferrer">
+          Versionshinweise
+        </a>
+      </p>
     </div>
   );
 }
@@ -282,7 +290,7 @@ function CollectorSection(props: { onError: (error: unknown) => void; onToast: (
       <p className="small muted pretty" style={{ marginBottom: 10, maxWidth: "68ch" }}>
         Der Sammler zählt alle 5 Minuten die Ticketlisten und schreibt die Messpunkte für Verlauf,
         Eingangs-Historie und Übernahmen. Er nutzt dafür die Sitzung aus deiner Anmeldung — es liegt
-        kein Passwort auf dem Server. Abmelden beendet nur den Browser, nicht den Sammler.
+        kein Passwort auf dem Server. Abmelden meldet alle Browser ab, nicht aber den Sammler.
       </p>
       <div className="card pad">
         {state?.present ? (

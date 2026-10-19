@@ -44,6 +44,7 @@ import {
 } from "../shared/template.ts";
 import { createCallLog, loggableBody, type CallLog } from "./log.ts";
 import { readSession, requireEmployee, requireSession, type SessionData } from "./session.ts";
+import { VERSION } from "./version.ts";
 import { createSharedSession, type SharedSession } from "./shared-session.ts";
 import { LinearError, type LinearClient } from "./linear.ts";
 import { buildSuggestions, importKey, parseRules } from "../shared/import.ts";
@@ -272,7 +273,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   // --- auth ------------------------------------------------------------------
 
-  app.get("/health", async () => ({ ok: true }));
+  app.get("/health", async () => ({ ok: true, version: VERSION }));
 
   app.get("/auth/config", async () => ({
     tokenRequired: totp === null,
