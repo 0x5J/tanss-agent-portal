@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+.env
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Lokaler Zustand (Import-Regeln, Mappings, Tagesabschlüsse)
+.data
+
+# Agent-Einstellungen (API-Key) und Freigabe-Queue
+data
+.env.bak
+
+# Arbeitsablage der Subagenten-Ausführung (Ledger, Briefs, Review-Pakete)
+.superpowers/
+
+# Lokale Review-Ablage
+.tmp-review/
