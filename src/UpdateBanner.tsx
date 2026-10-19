@@ -16,6 +16,8 @@ type StartHandlers = {
   onOverview: (next: UpdateOverview) => void;
   onToast: (text: string) => void;
   onError: (error: unknown) => void;
+  /** True while the start request runs; only after the user said yes. */
+  onBusy?: (busy: boolean) => void;
 };
 
 /**
@@ -28,12 +30,15 @@ export async function confirmAndStartUpdate(version: string, handlers: StartHand
     `Das Portal startet dabei neu und ist etwa eine Minute nicht erreichbar. Jetzt auf ${version} aktualisieren?`,
   );
   if (!ok) return;
+  handlers.onBusy?.(true);
   try {
     handlers.onOverview(await api.startUpdate(version));
   } catch (error) {
     // 409 / 503 carry a sentence for the user; report() would mistake 503 for TANSS being down.
     if (error instanceof ApiError && (error.status === 409 || error.status === 503)) handlers.onToast(error.message);
     else handlers.onError(error);
+  } finally {
+    handlers.onBusy?.(false);
   }
 }
 
@@ -60,11 +65,9 @@ export function UpdateBanner(props: Props) {
 
   const latest = overview.latest;
 
-  async function start() {
+  function start() {
     if (!latest) return;
-    setStarting(true);
-    await confirmAndStartUpdate(latest.version, { onOverview, onToast, onError });
-    setStarting(false);
+    void confirmAndStartUpdate(latest.version, { onOverview, onToast, onError, onBusy: setStarting });
   }
 
   function dismiss() {
@@ -88,7 +91,7 @@ export function UpdateBanner(props: Props) {
           </a>
         ) : null}
         {banner.action === "update" && latest ? (
-          <button className="btn primary" disabled={starting} onClick={() => void start()}>
+          <button className="btn primary" disabled={starting} onClick={start}>
             Jetzt aktualisieren
           </button>
         ) : null}
