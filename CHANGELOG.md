@@ -33,6 +33,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 - Der Updater ist der einzige Dienst mit Docker-Zugriff; das Portal reicht nur
   eine Versionsnummer weiter.
 - Der Dateiaustausch zwischen Portal und Updater ist gegen Symlinks gehärtet.
+- Die Workflows binden alle GitHub Actions per Commit-Hash ein; Dependabot
+  hält sie aktuell.
 - Abhängigkeiten aktualisiert, die bekannte Lücken hatten: `fastify` 5.12.7
   (u. a. Umgehung der Authentifizierung und der Validierung), `fast-uri`,
   `ip-address` und `brace-expansion` im Server sowie `shell-quote`,
