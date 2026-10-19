@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Installationsanleitung neu geschrieben: welche zwei Dateien es braucht, wie
+  die `.env` ausgefüllt wird, wie man startet und prüft.
+- Die `.env`-Vorlage (`env.example`) beginnt mit den beiden Pflichtwerten;
+  `PORT` und `BIND` sind auskommentiert, weil sie unter Docker nicht wirken.
+
 ## [0.3.0] – 2026-10-19
 
 ### Hinzugefügt

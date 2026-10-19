@@ -1,13 +1,12 @@
-# Agent-Portal (tanss_v2)
+# Agent-Portal für TANSS
 
 Web-Oberfläche für die eigenen Tickets und Leistungen in
 [TANSS](https://www.tanss.de/), dem Ticket- und Abrechnungssystem für
 IT-Dienstleister — mit einem optionalen KI-Agenten, der gegen ein lokales
-Sprachmodell läuft. Umgesetzt nach dem Design-Artboard
-`docs/design/Agent-Portal.dc.html`. Ein Container, ein
-Prozess: Fastify hält die TANSS-Session serverseitig, das HttpOnly-Cookie trägt
-nur die Identität, und die gebaute React-Oberfläche kommt aus demselben
-Container. Der Browser spricht nie selbst mit TANSS.
+Sprachmodell läuft. Ein Container, ein Prozess: Fastify hält die
+TANSS-Session serverseitig, das HttpOnly-Cookie trägt nur die Identität, und
+die gebaute React-Oberfläche kommt aus demselben Container. Der Browser
+spricht nie selbst mit TANSS.
 
 > Inoffizielles Projekt, nicht mit dem Hersteller von TANSS verbunden. Es
 > spricht die öffentliche TANSS-REST-API an; die Dokumentation dazu gibt es
@@ -16,70 +15,138 @@ Container. Der Browser spricht nie selbst mit TANSS.
 ## Voraussetzungen
 
 - eine TANSS-Instanz mit freigeschalteter REST-API und ein eigenes Konto
-- Docker mit Compose (Docker Desktop unter Windows und macOS) — für den
-  Betrieb weder Git noch Node.js; Node.js ≥ 22 nur für die Entwicklung
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows,
+  macOS) oder Docker mit Compose-Plugin (Linux). Git und Node.js braucht der
+  Betrieb nicht.
 - optional: ein OpenAI-kompatibler LLM-Endpoint (oMLX, Ollama, LM Studio, vLLM)
   für die KI-Funktionen
 - optional: ein persönlicher Linear-API-Key für den Tagesimport
 
 ## Installation
 
-Es braucht nur einen Ordner mit `compose.yaml`, `.env` und `data/update/`. Die
-fertigen Images kommen von `ghcr.io`, ein Klon des Repos ist nicht nötig.
-`compose.yaml` und die Vorlage der `.env` hängen an jedem Release;
-`releases/latest` zeigt immer auf die zuletzt freigegebene Version, nie auf ein
-Pre-Release. Die Vorlage heißt dort `env.example` (GitHub entfernt den Punkt am
-Anfang von Dateinamen).
+Das Portal besteht aus zwei fertigen Images auf `ghcr.io`, die Docker selbst
+herunterlädt. Du brauchst nur einen Ordner mit **zwei Dateien**; das Repo
+musst du nicht klonen.
 
-macOS und Linux:
+| Datei | Woher | Was du damit tust |
+| --- | --- | --- |
+| `compose.yaml` | Release-Download `compose.yaml` | nichts — sie beschreibt Portal und Updater und wird nicht bearbeitet |
+| `.env` | Release-Download `env.example`, gespeichert als `.env` | deine Einstellungen; Pflicht sind nur `TANSS_BASE_URL` und `SESSION_SECRET` |
 
-```bash
-mkdir -p tanss-agent-portal/data/update && cd tanss-agent-portal
-curl -fLO https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml
-curl -fL -o .env.example https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example
-cp .env.example .env
-# .env anpassen: TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
-chmod 600 .env
-docker compose up -d          # http://127.0.0.1:3848
+Dazu kommt der Ordner `data/` für alles, was das Portal speichert (Sitzung,
+KI-Einstellungen, Listen, Berichte). Fertig eingerichtet sieht der Ordner so
+aus:
+
+```
+agent-portal/
+├── compose.yaml
+├── .env
+└── data/
+    └── update/      Austausch mit dem Updater, bleibt leer
 ```
 
-Unter Linux läuft das Portal im Container als uid 1000. Hat der eigene
-Benutzer eine andere uid (`id -u`), einmal `sudo chown -R 1000:1000 data`
-ausführen — sonst kann das Portal nichts speichern, und der Updater lehnt
-`data/update` ab (er nimmt nur Ordner von root oder uid 1000).
+### 1. Ordner anlegen und Dateien laden
 
-Windows (Docker Desktop, PowerShell):
+macOS und Linux (Terminal):
+
+```bash
+mkdir -p agent-portal/data/update
+cd agent-portal
+curl -fLO https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml
+curl -fL -o .env https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example
+chmod 600 .env
+```
+
+Windows (PowerShell):
 
 ```powershell
-New-Item -ItemType Directory -Force -Path tanss-agent-portal\data\update | Out-Null
-Set-Location tanss-agent-portal
-Invoke-WebRequest -Uri https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml -OutFile compose.yaml
-Invoke-WebRequest -Uri https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example -OutFile .env.example
-Copy-Item .env.example .env
-notepad .env    # TANSS_BASE_URL, SESSION_SECRET (≥ 32 Zeichen), optional TOTP_SECRET
+New-Item -ItemType Directory -Force -Path agent-portal\data\update | Out-Null
+Set-Location agent-portal
+Invoke-WebRequest https://github.com/0x5J/tanss-agent-portal/releases/latest/download/compose.yaml -OutFile compose.yaml
+Invoke-WebRequest https://github.com/0x5J/tanss-agent-portal/releases/latest/download/env.example -OutFile .env
+```
+
+`releases/latest` ist immer die zuletzt freigegebene Version. Die Vorlage
+heißt im Release `env.example` statt `.env`, weil GitHub den Punkt am Anfang
+von Dateinamen entfernt — der Befehl oben speichert sie gleich unter dem
+richtigen Namen.
+
+### 2. `.env` ausfüllen
+
+Die Datei in einem Texteditor öffnen (Windows: `notepad .env`) und die beiden
+Pflichtwerte ganz oben eintragen:
+
+- **`TANSS_BASE_URL`** — die Adresse der TANSS-API, meist die TANSS-Adresse
+  mit `/backend` am Ende, z. B. `https://tanss.firma.de/backend`.
+- **`SESSION_SECRET`** — eine zufällige Zeichenfolge, mindestens 32 Zeichen.
+  Erzeugen lässt sie sich so:
+
+  ```bash
+  openssl rand -hex 32
+  ```
+
+  ```powershell
+  $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })
+  ```
+
+Alles andere in der Datei ist auskommentiert (`#`) und optional, siehe
+[Einstellungen](#einstellungen-env).
+
+**Nur Linux:** Das Portal läuft im Container als Benutzer mit der uid 1000.
+Hat dein Benutzer eine andere (`id -u`), einmal `sudo chown -R 1000:1000 data`
+ausführen — sonst kann das Portal nichts speichern, und der Updater lehnt
+`data/update` ab.
+
+### 3. Starten
+
+Im Ordner `agent-portal`:
+
+```bash
 docker compose up -d
 ```
 
-Das Portal hört nur auf `127.0.0.1`; `HOST_PORT` in der `.env` ändert den Port.
+Docker lädt beim ersten Start die beiden Images und startet zwei Container:
+das **Portal** und den **Updater** (spielt Updates ein, siehe
+[Updates](#updates)). Danach ist das Portal unter
+**<http://127.0.0.1:3848>** erreichbar, nur von diesem Rechner aus. Angemeldet
+wird mit dem eigenen TANSS-Konto.
 
-Entwicklungs-Build aus dem Quellcode (im Klon des Repos, baut beide Images
-lokal):
+Nützliche Befehle, jeweils im Ordner `agent-portal`:
 
-```bash
-cp .env.example .env
-docker compose -f compose.yaml -f compose.build.yaml up -d --build
-```
+| Befehl | Wirkung |
+| --- | --- |
+| `docker compose ps` | läuft alles? |
+| `docker compose logs -f portal` | Ausgaben des Portals (Abbruch mit Strg+C) |
+| `docker compose down` | stoppen; `data/` bleibt erhalten |
+| `docker compose up -d` | wieder starten |
 
-Ein Ein-Klick-Update ersetzt auch hier das lokal gebaute Portal durch das
-Release-Image.
+Startet das Portal nicht, steht der Grund in `docker compose logs portal`,
+meist ein fehlender oder zu kurzer Pflichtwert in der `.env`.
 
-Entwicklung ohne Container:
+## Einstellungen (`.env`)
 
-```bash
-npm install
-npm run dev      # API auf :3848, Oberfläche auf :5173
-npm run check    # Typen + Tests
-```
+Alle Einstellungen stehen in der `.env`; nach einer Änderung
+`docker compose up -d` ausführen. `compose.yaml` bleibt unverändert.
+
+| Variable | Zweck |
+| --- | --- |
+| `TANSS_BASE_URL` | **Pflicht.** Basis-URL der TANSS-API (z. B. `https://tanss…/backend`) |
+| `SESSION_SECRET` | **Pflicht.** Cookie-Schlüssel, ≥ 32 Zeichen |
+| `TOTP_SECRET` | erzeugt den 2FA-Code serverseitig, siehe [Anmeldung](#anmeldung) |
+| `TANSS_USERNAME`, `TANSS_PASSWORD` | nur zusammen, standardmäßig leer: Rückfall-Anmeldung ohne Menschen. Der Sammler braucht sie nicht |
+| `LINEAR_API_KEY` | persönlicher Linear-Key für den Tagesimport |
+| `TANSS_TICKET_URL` | Link „In TANSS öffnen"; ohne Eintrag abgeleitet |
+| `HOST_PORT` | Port im Browser (Standard 3848) |
+| `PORTAL_TAG` | Image-Tag: `latest` (Standard), `staging` oder feste Version — eine feste Version schaltet Ein-Klick-Updates ab |
+| `UPDATE_CHANNEL` | `stable` (Standard) oder `staging` (auch Vorabversionen) |
+| `UPDATE_CHECK` | `0` schaltet die Update-Abfrage bei GitHub ab |
+| `COMPOSE_PROJECT_NAME` | Name des Compose-Projekts, bestimmt die Containernamen |
+| `DEBUG_TANSS` | `1` gibt alle TANSS-Aufrufe auf der Konsole aus |
+| `PORT`, `BIND`, `DATA_DIR` | nur ohne Docker; unter Docker setzt `compose.yaml` sie selbst |
+
+> **Achtung bei Sonderzeichen.** Docker liest die `.env` selbst ein: `$` löst
+> Variablen-Expansion aus, `#` gilt als Kommentarbeginn. Werte mit diesen
+> Zeichen gehören in einfache Anführungszeichen, z. B. `TANSS_PASSWORD='...'`.
 
 ## Updates
 
@@ -87,7 +154,9 @@ Ist eine neuere Version freigegeben, zeigt das Portal ein Banner mit „Jetzt
 aktualisieren". Der Klick beauftragt den **Updater**, einen zweiten Container
 neben dem Portal: Er zieht das neue Image, ersetzt den Portal-Container, wartet
 auf `/health` mit der neuen Version und stellt bei einem Fehler die alte Version
-wieder her. Den Stand zeigt das Banner; danach lädt die Seite neu.
+wieder her. Den Stand zeigt das Banner; danach lädt die Seite neu. Ein
+ausstehendes Update steht außerdem unten in der Navigation unter „Version";
+ein Klick darauf startet es mit derselben Rückfrage.
 
 Der Updater ist der einzige Dienst mit Docker-Zugriff (Socket) und hat keine
 Ports. Das Portal selbst bekommt keine Docker-Rechte und reicht nur eine
@@ -131,45 +200,47 @@ Oder einfach `docker compose up -d`: Compose erstellt das Portal dann aus der
 
 ## Staging
 
-Neue Versionen lassen sich vor der Freigabe in einer zweiten Instanz testen:
-zweiter Ordner mit eigener `compose.yaml`, eigener `.env` und eigenem `data/`
-(also auch eigene Anmeldung). Die Dateien kommen vom Pre-Release selbst, z. B.
-für `vX.Y.Z`:
+Neue Versionen erscheinen zuerst als Vorabversion (Pre-Release). Um sie vor
+der Freigabe zu testen, richtest du eine zweite Instanz ein — genauso wie oben,
+nur in einem eigenen Ordner, mit den Dateien des Pre-Release und vier
+zusätzlichen Zeilen in der `.env`:
 
-```bash
-mkdir -p tanss-agent-portal-staging/data/update && cd tanss-agent-portal-staging
-curl -fLO https://github.com/0x5J/tanss-agent-portal/releases/download/vX.Y.Z/compose.yaml
-curl -fL -o .env.example https://github.com/0x5J/tanss-agent-portal/releases/download/vX.Y.Z/env.example
-cp .env.example .env
-```
+1. Ordner `agent-portal-staging` mit `data/update` anlegen und `compose.yaml`
+   sowie `env.example` (als `.env`) laden — wie in Schritt 1 der
+   Installation, aber statt `releases/latest/download/` die Adresse
+   `releases/download/vX.Y.Z/` des Pre-Release verwenden.
+2. In der `.env` die Pflichtwerte eintragen und am Ende der Datei bei diesen
+   vier Zeilen das `#` entfernen:
 
-Unter Windows dieselben Adressen mit `Invoke-WebRequest` wie bei der
-Installation. In die `.env` des Staging-Ordners:
+   ```
+   COMPOSE_PROJECT_NAME=agent-portal-staging
+   HOST_PORT=3849
+   PORTAL_TAG=staging
+   UPDATE_CHANNEL=staging
+   ```
 
-```
-COMPOSE_PROJECT_NAME=agent-portal-staging
-HOST_PORT=3849
-PORTAL_TAG=staging
-UPDATE_CHANNEL=staging
-```
+3. `docker compose up -d` — die Staging-Instanz läuft dann unter
+   <http://127.0.0.1:3849>, unabhängig von der normalen Instanz.
+
+Die Staging-Instanz bekommt jede neue Vorabversion als Update angeboten.
 
 > **Achtung:** Staging spricht das TANSS an, das in seiner `.env` steht. Ohne
 > separates Testsystem sind das echte Daten.
 
 ## Umstieg von 0.1.0
 
-Die alte `compose.yaml` baute das Image lokal und vergab den Containernamen
-`agent-portal`. So wechselst du auf die Images (erst möglich, sobald 0.2.0 als
-stabile Version freigegeben ist — vorher liefert `releases/latest` noch keine
-`compose.yaml`):
+Bis 0.1.0 baute `compose.yaml` das Image lokal aus dem Repo und vergab den
+Containernamen `agent-portal`. Zum Wechsel auf die fertigen Images (möglich,
+sobald 0.2.0 oder neuer freigegeben ist):
 
-1. Im alten Ordner `compose.yaml` durch die aktuelle ersetzen (Download wie
-   unter Installation); `.env` und `data/` bleiben.
-2. `docker compose pull`
-3. `docker compose up -d` — ohne vorheriges `docker compose down`: Compose
-   ersetzt den alten Container `agent-portal` selbst.
+1. Im bisherigen Ordner `compose.yaml` durch die aktuelle ersetzen (Download
+   wie in Schritt 1 der Installation). `.env` und `data/` bleiben.
+2. Den Ordner `data/update` anlegen.
+3. `docker compose pull`, dann `docker compose up -d` — ohne vorheriges
+   `docker compose down`: Compose ersetzt den alten Container `agent-portal`
+   selbst.
 
-Die Container heißen jetzt nach dem Projekt, z. B. `agent-portal-portal-1`.
+Die Container heißen danach nach dem Projekt, z. B. `agent-portal-portal-1`.
 
 ## Anmeldung
 
@@ -273,6 +344,26 @@ schreibt weder nach TANSS noch in den Store.
 Risiko-Score und Linear/Git als Quellen des Agenten (Ausbaustufe 2).
 Mailversand kennt die TANSS-API nicht.
 
+## Entwicklung
+
+Für Änderungen am Code braucht es einen Klon des Repos und Node.js ≥ 22:
+
+```bash
+cp .env.example .env    # Pflichtwerte eintragen
+npm install
+npm run dev             # API auf :3848, Oberfläche auf :5173
+npm run check           # Typen + Tests
+```
+
+Beide Images lokal bauen und wie im Betrieb starten:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+Ein Ein-Klick-Update ersetzt auch hier das lokal gebaute Portal durch das
+Release-Image.
+
 ## Aufbau
 
 ```
@@ -283,19 +374,6 @@ src/      React-Oberfläche; Tokens aus dem Artboard in styles/app.css
 updater/  eigener Container für Ein-Klick-Updates (nur Node-Bordmittel, Docker-Socket)
 docs/     Design-Artboard
 ```
-
-| Variable | Zweck |
-| --- | --- |
-| `TANSS_BASE_URL` | Basis-URL der TANSS-API (z. B. `https://tanss…/backend`) |
-| `DATA_DIR` | Ablage für TANSS-Sitzung, Tagesberichte (`reports/<mitarbeiter>/`), Übernahme-Protokoll, KI-Einstellungen, gespeicherte Listen, Messpunkte und Freigabe-Queue (Standard `data`, im Container `/app/data` als Volume `./data`) |
-| `SESSION_SECRET` | Cookie-Schlüssel, ≥ 32 Zeichen |
-| `TOTP_SECRET` | optional, erzeugt den 2FA-Code serverseitig |
-| `TANSS_USERNAME`, `TANSS_PASSWORD` | optional (nur zusammen), standardmäßig leer: Rückfall-Anmeldung ohne Menschen. Der Sammler braucht sie nicht |
-| `TANSS_TICKET_URL` | optional, Link „In TANSS öffnen" |
-| `UPDATE_CHANNEL`, `UPDATE_CHECK` | `stable` (Standard) oder `staging`; `UPDATE_CHECK=0` schaltet die Update-Abfrage ab |
-| `PORTAL_TAG`, `HOST_PORT`, `COMPOSE_PROJECT_NAME` | nur für Compose: Image-Tag, Port auf dem Host, Projektname |
-| `PORT`, `BIND` | Standard 3848 / 127.0.0.1 (Container: 0.0.0.0 + `ALLOW_ALL_INTERFACES=1`) |
-| `DEBUG_TANSS=1` | alle TANSS-Aufrufe auf die Konsole |
 
 ## Versionen und Releases
 
