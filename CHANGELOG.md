@@ -6,6 +6,14 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Sicherheit
+
+- Abhängigkeiten aktualisiert, die bekannte Lücken hatten: `fastify` 5.12.7
+  (u. a. Umgehung der Authentifizierung und der Validierung), `fast-uri`,
+  `ip-address` und `brace-expansion` im Server sowie `shell-quote`,
+  `source-map-js` in den Entwicklungswerkzeugen. `npm audit` meldet keine
+  Lücken mehr.
+
 ## [0.1.0] – 2026-10-19
 
 Erste öffentliche Version.
