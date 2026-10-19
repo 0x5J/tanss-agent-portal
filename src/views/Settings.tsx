@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, type AgentSettings } from "../api.ts";
+import { api, ApiError, type AgentSettings } from "../api.ts";
+import { dayAndClock } from "../format.ts";
+import type { UpdateOverview } from "../../shared/update.ts";
 import { threadBudget } from "../../shared/agent.ts";
 import {
   MAX_ROUTINES,
@@ -235,6 +237,49 @@ export function SettingsView(props: Props) {
         <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen in den Freigaben.</span>
       </div>
 
+      <VersionSection onError={props.onError} onToast={props.onToast} />
+    </div>
+  );
+}
+
+/**
+ * Installed version plus the update check. Without an update service (the
+ * routes answer 404) it is just the version line.
+ */
+function VersionSection(props: { onError: (error: unknown) => void; onToast: (text: string) => void }) {
+  const [overview, setOverview] = useState<UpdateOverview | null>(null);
+  const [checking, setChecking] = useState(false);
+  const { onError, onToast } = props;
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .update()
+      .then((o) => !cancelled && setOverview(o))
+      .catch((error: unknown) => {
+        if (!cancelled && !(error instanceof ApiError && error.status === 404)) onError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
+
+  async function check() {
+    setChecking(true);
+    try {
+      const next = await api.checkUpdate();
+      setOverview(next);
+      if (next.checkError) return;
+      onToast(next.latest && next.latest.version !== next.current ? `Version ${next.latest.version} gefunden` : "Du bist auf dem neuesten Stand");
+    } catch (error) {
+      onError(error);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <>
       <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Version</h2>
       <p className="small muted">
         Agent-Portal {__APP_VERSION__} ·{" "}
@@ -242,7 +287,28 @@ export function SettingsView(props: Props) {
           Versionshinweise
         </a>
       </p>
-    </div>
+      {overview ? (
+        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+          {overview.enabled ? (
+            <>
+              <span className="small muted">Kanal: {overview.channel === "staging" ? "Staging" : "stabil"}</span>
+              {overview.checkError ? (
+                <span className="small" style={{ color: "var(--danger)" }}>
+                  Prüfung fehlgeschlagen: {overview.checkError}
+                </span>
+              ) : overview.checkedAt ? (
+                <span className="small muted">zuletzt geprüft {dayAndClock(Math.floor(overview.checkedAt / 1000))}</span>
+              ) : null}
+              <button className="btn" disabled={checking} onClick={() => void check()}>
+                {checking ? "Prüfe …" : "Jetzt prüfen"}
+              </button>
+            </>
+          ) : (
+            <span className="small muted">Update-Prüfung abgeschaltet (UPDATE_CHECK=0)</span>
+          )}
+        </div>
+      ) : null}
+    </>
   );
 }
 

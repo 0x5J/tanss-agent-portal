@@ -7,6 +7,7 @@ import type { AssistantResult } from "../shared/assistant.ts";
 import type { StyleSettings } from "../shared/style.ts";
 import type { ImportRules, Suggestion, WorkflowState } from "../shared/import.ts";
 import type { Target } from "../shared/mapping.ts";
+import type { UpdateOverview } from "../shared/update.ts";
 
 export type ImportBookItem = {
   issue: string;
@@ -114,6 +115,10 @@ export const api = {
       token: token || undefined,
     }),
   logout: () => request<{ ok: true }>("POST", "/auth/logout"),
+  /** 404 means this installation has no update service. */
+  update: () => request<UpdateOverview>("GET", "/me/update"),
+  checkUpdate: () => request<UpdateOverview>("POST", "/me/update/check"),
+  startUpdate: (version: string) => request<UpdateOverview>("POST", "/me/update", { version }),
   meta: () => request<Meta>("GET", "/me/meta"),
   tickets: () =>
     request<{ rows: TicketRow[]; employeeId: number; employeeName: string; missing: string[] }>(
