@@ -304,8 +304,8 @@ laufende Version steht in den Einstellungen und in der Antwort von `/health`,
 die Änderungen je Version in [CHANGELOG.md](CHANGELOG.md). Zu jeder Version
 gibt es fertige Images für amd64 und arm64, für das Portal
 (`ghcr.io/0x5j/tanss-agent-portal`) und den Updater
-(`ghcr.io/0x5j/tanss-agent-portal-updater`). `latest` und `<major>.<minor>`
-zeigen immer auf die zuletzt freigegebene Version.
+(`ghcr.io/0x5j/tanss-agent-portal-updater`). `latest` zeigt auf die höchste
+freigegebene Version, `<major>.<minor>` auf die höchste dieser Reihe.
 
 Eine neue Version veröffentlichen:
 
@@ -325,9 +325,11 @@ Eine neue Version veröffentlichen:
 5. Auf der Staging-Instanz testen (Update per Banner oder
    `docker compose pull && docker compose up -d`).
 6. Freigeben: in GitHub am Release den Haken „Pre-release" entfernen oder
-   `gh release edit vX.Y.Z --prerelease=false --latest`. `promote.yml` setzt
-   `latest` und `X.Y` auf denselben Image-Digest wie `X.Y.Z` (nichts wird neu
-   gebaut); danach sehen Live-Instanzen das Update. Notfalls lässt sich der
+   `gh release edit vX.Y.Z --prerelease=false --latest` (bei einem Patch einer
+   älteren Reihe `--latest=false`). `promote.yml` setzt `latest` und `X.Y` auf
+   denselben Image-Digest wie `X.Y.Z` (nichts wird neu gebaut), aber nur
+   vorwärts: Ist schon eine höhere Version freigegeben, bleiben die Tags
+   stehen. Danach sehen Live-Instanzen das Update. Notfalls lässt sich der
    Workflow mit der Version von Hand starten.
 
 Ein Fehler in einer getesteten Version wird nicht nachträglich überschrieben:

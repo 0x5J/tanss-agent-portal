@@ -3,6 +3,8 @@ name: Promote
 # Gibt eine getestete Version frei: Sobald ein Pre-Release in GitHub zum
 # Release gemacht wird (Haken "Pre-release" entfernt), zeigen latest und X.Y
 # auf genau dieselben Images (Digest) wie X.Y.Z -- es wird nichts neu gebaut.
+# latest rueckt nur fuer die hoechste freigegebene Version nach, X.Y nur fuer
+# die hoechste ihrer Reihe; ein Patch einer aelteren Reihe dreht nichts zurueck.
 on:
   release:
     types: [released]
@@ -55,8 +57,32 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           MINOR: ${{ steps.version.outputs.minor }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Nur freigegebene Versionen zaehlen; ein hoeheres Pre-Release haelt
+          # einen Patch nicht von latest fern.
+          released="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+          versions="$( { printf '%s\n' "$released" | sed 's/^v//'; echo "$VERSION"; } \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV)"
+          highest="$(printf '%s\n' "$versions" | tail -n 1)"
+          highest_minor="$(printf '%s\n' "$versions" | awk -v m="$MINOR." 'index($0, m) == 1' | tail -n 1)"
+
+          tags=()
+          if [ "$highest" = "$VERSION" ]; then
+            tags+=(latest)
+          else
+            echo "::notice::$VERSION ist nicht die hoechste freigegebene Version ($highest): latest bleibt"
+          fi
+          if [ "$highest_minor" = "$VERSION" ]; then
+            tags+=("$MINOR")
+          else
+            echo "::notice::$VERSION ist nicht die hoechste Version der Reihe $MINOR ($highest_minor): $MINOR bleibt"
+          fi
+          [ "${#tags[@]}" -gt 0 ] || exit 0
+
           for image in "$IMAGE" "$IMAGE_UPDATER"; do
-            docker buildx imagetools create \
-              -t "$image:latest" -t "$image:$MINOR" "$image:$VERSION"
+            args=()
+            for tag in "${tags[@]}"; do args+=(-t "$image:$tag"); done
+            docker buildx imagetools create "${args[@]}" "$image:$VERSION"
           done
