@@ -1,7 +1,7 @@
 // One update run: pull the requested version, replace the portal container
 // and verify the new one via /health. Anything that goes wrong after the old
 // container was touched is undone, so the old version keeps running.
-import { isVersion, type UpdateRequest, type UpdateState, type UpdateStatus } from "../shared/update.ts";
+import { compareVersions, isVersion, type UpdateRequest, type UpdateState, type UpdateStatus } from "../shared/update.ts";
 import type { ContainerInfo, DockerApi } from "./docker.ts";
 import { createSpec } from "./recreate.ts";
 
@@ -13,6 +13,7 @@ const PREVIOUS_SUFFIX = "-vorher";
 const COMPOSE_PROJECT = "com.docker.compose.project";
 const COMPOSE_SERVICE = "com.docker.compose.service";
 const COMPOSE_IMAGE = "com.docker.compose.image";
+const MANUAL_UPDATE = "docker compose pull && docker compose up -d";
 
 export interface UpdateDeps {
   docker: DockerApi;
@@ -114,6 +115,17 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     const tag = parseReference(oldImageRef).tag;
     if (running && isVersion(running)) from = running;
     else if (tag && isVersion(tag)) from = tag;
+
+    // A pinned version would be undone by the next `docker compose up -d`.
+    if (tag && isVersion(tag)) {
+      return report(
+        "failed",
+        `PORTAL_TAG ist fest auf ${tag} gesetzt — zum Aktualisieren PORTAL_TAG in .env ändern und \`${MANUAL_UPDATE}\` ausführen`,
+      );
+    }
+    if (isVersion(from) && compareVersions(version, from) <= 0) {
+      return report("failed", `Version ${version} läuft bereits oder ist älter`);
+    }
 
     report("pulling", "Image wird geladen");
     try {

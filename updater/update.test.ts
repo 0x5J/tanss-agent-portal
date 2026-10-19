@@ -242,14 +242,47 @@ describe("runUpdate", () => {
     expect(t.healthUrls[0]).toBe(`http://${OLD_IP}:3848/health`);
   });
 
-  it("takes from from the old image tag when the old health check fails", async () => {
+  it("refuses a pinned PORTAL_TAG without touching anything", async () => {
+    const t = setup({ docker: fakeDocker({ old: oldContainer({ image: `${REPO}:0.1.0` }) }) });
+    const result = await runUpdate(t.deps, REQUEST);
+    expect(result).toMatchObject({
+      state: "failed",
+      from: "0.1.0",
+      to: "0.2.0",
+      message:
+        "PORTAL_TAG ist fest auf 0.1.0 gesetzt — zum Aktualisieren PORTAL_TAG in .env ändern und `docker compose pull && docker compose up -d` ausführen",
+    });
+    expect(mutating(t.calls)).toEqual([]);
+    expect(t.reports).toEqual([result]);
+  });
+
+  it("takes from from the pinned tag when the old health check fails", async () => {
     const t = setup({
       docker: fakeDocker({ old: oldContainer({ image: `${REPO}:0.1.5` }) }),
-      health: (url) => (url.includes(NEW_IP) ? "0.2.0" : null),
+      health: () => null,
     });
     const result = await runUpdate(t.deps, REQUEST);
-    expect(result.state).toBe("done");
+    expect(result.state).toBe("failed");
     expect(result.from).toBe("0.1.5");
+  });
+
+  it("refuses the version that already runs without touching anything", async () => {
+    const t = setup({ health: () => "0.2.0" });
+    const result = await runUpdate(t.deps, REQUEST);
+    expect(result).toMatchObject({
+      state: "failed",
+      from: "0.2.0",
+      message: "Version 0.2.0 läuft bereits oder ist älter",
+    });
+    expect(mutating(t.calls)).toEqual([]);
+    expect(t.reports).toEqual([result]);
+  });
+
+  it("refuses a downgrade without touching anything", async () => {
+    const t = setup({ health: () => "0.3.0" });
+    const result = await runUpdate(t.deps, REQUEST);
+    expect(result).toMatchObject({ state: "failed", message: "Version 0.2.0 läuft bereits oder ist älter" });
+    expect(mutating(t.calls)).toEqual([]);
   });
 
   it("reports from as unbekannt without health and without a version tag", async () => {
@@ -526,13 +559,6 @@ describe("runUpdate", () => {
     expect(result.message).toContain("no space left");
     expect(names(t.calls)).not.toContain(`startContainer(${OLD_ID})`);
     expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "done"]);
-  });
-
-  it("does not retag a pinned version reference", async () => {
-    const t = setup({ docker: fakeDocker({ old: oldContainer({ image: `${REPO}:0.1.0` }) }) });
-    const result = await runUpdate(t.deps, REQUEST);
-    expect(result.state).toBe("done");
-    expect(t.calls.some(([m]) => m === "tagImage")).toBe(false);
   });
 
   it("does not retag a digest reference", async () => {

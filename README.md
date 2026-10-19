@@ -73,7 +73,9 @@ Versionsnummer weiter.
 - **Ohne Updater** (oder von Hand): `docker compose pull && docker compose up -d`.
 - Den Updater selbst aktualisiert nur dieser Handgriff; das
   [Changelog](CHANGELOG.md) nennt, wann das nötig ist.
-- Eine feste `PORTAL_TAG` (z. B. `0.2.0`) verschiebt der Updater nie. Mit
+- Eine feste `PORTAL_TAG` (z. B. `0.2.0`) schaltet Ein-Klick-Updates ab: Der
+  Updater lehnt den Auftrag ab. Zum Aktualisieren `PORTAL_TAG` in der `.env`
+  ändern und `docker compose pull && docker compose up -d` ausführen. Mit
   `latest` oder `staging` läuft der Container nach dem Update auf der neuen
   Version weiter.
 - `UPDATE_CHECK=0` schaltet die Abfrage bei GitHub ab (kein Banner).
