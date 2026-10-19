@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -211,6 +211,15 @@ describe("request", () => {
     const svc = await ready();
     chmodSync(dir, 0o500);
     await expectUpdateError(() => svc.request("0.2.0"), 503, "Update-Ordner nicht beschreibbar");
+  });
+
+  it("leaves only names in the folder that the updater accepts, even on failure", async () => {
+    heartbeat();
+    const svc = await ready();
+    // A directory in place of request.json makes the final rename fail.
+    mkdirSync(requestPath());
+    await expectUpdateError(() => svc.request("0.2.0"), 503, "Update-Ordner nicht beschreibbar");
+    expect(readdirSync(dir).sort()).toEqual(["heartbeat.json", "request.json"]);
   });
 
   it("reads a folder that does not exist yet as updater missing", () => {

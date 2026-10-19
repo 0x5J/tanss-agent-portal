@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { UpdateRequest, UpdateStatus } from "../shared/update.ts";
-import { createLoop } from "./loop.ts";
+import { checkUpdateDir, createLoop } from "./loop.ts";
 
 let dir: string;
 
@@ -285,5 +285,62 @@ describe("createLoop", () => {
       await loop.tick();
       expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
     });
+  });
+});
+
+describe("checkUpdateDir", () => {
+  const me = process.getuid?.() ?? 0;
+
+  it("accepts a plain folder with the protocol files and temp files", () => {
+    for (const name of ["request.json", "status.json", "heartbeat.json", ".status.json.0b1c.tmp", ".request.json.tmp"]) {
+      writeFileSync(path.join(dir, name), "{}");
+    }
+    expect(checkUpdateDir(dir, [me])).toBeNull();
+  });
+
+  it("accepts an empty folder", () => {
+    expect(checkUpdateDir(dir, [me])).toBeNull();
+  });
+
+  it("rejects a folder with a foreign file", () => {
+    writeFileSync(path.join(dir, "status.json"), "{}");
+    writeFileSync(path.join(dir, "id_rsa"), "secret");
+    expect(checkUpdateDir(dir, [me])).toContain("id_rsa");
+  });
+
+  it("rejects a foreign subfolder", () => {
+    mkdirSync(path.join(dir, "etc"));
+    expect(checkUpdateDir(dir, [me])).toContain("etc");
+  });
+
+  it("rejects a folder owned by another user", () => {
+    expect(checkUpdateDir(dir, [me + 1])).toContain(`gehört Benutzer ${me}`);
+  });
+
+  it("accepts only root or uid 1000 by default", () => {
+    const result = checkUpdateDir(dir);
+    if (me === 0 || me === 1000) expect(result).toBeNull();
+    else expect(result).toContain(`gehört Benutzer ${me}`);
+  });
+
+  it("rejects a symlink in place of the folder", () => {
+    const outside = mkdtempSync(path.join(tmpdir(), "updater-outside-"));
+    try {
+      const link = path.join(dir, "link");
+      symlinkSync(outside, link);
+      expect(checkUpdateDir(link, [me])).toContain("symbolischer Link");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a file in place of the folder", () => {
+    const file = path.join(dir, "file");
+    writeFileSync(file, "x");
+    expect(checkUpdateDir(file, [me])).toContain("kein Ordner");
+  });
+
+  it("rejects a missing folder", () => {
+    expect(checkUpdateDir(path.join(dir, "gone"), [me])).toContain("nicht lesbar");
   });
 });

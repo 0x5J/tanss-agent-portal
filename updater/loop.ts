@@ -6,8 +6,10 @@ import {
   constants,
   fchmodSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readSync,
   renameSync,
   rmSync,
@@ -29,6 +31,40 @@ export interface LoopOptions {
   version: string;
   run(request: UpdateRequest): Promise<UpdateStatus>;
   now(): number;
+}
+
+/** The only names that belong in the update folder. */
+const PROTOCOL_FILES = new Set([REQUEST_FILE, STATUS_FILE, HEARTBEAT_FILE]);
+/** Temp files of the atomic writes on both sides, e.g. ".status.json.<uuid>.tmp". */
+const TEMP_FILE = /^\..+\.tmp$/;
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Checks that the mounted folder is what compose.yaml mounts: a real folder
+ * (no symlink) owned by root or the portal user, holding nothing but the
+ * protocol files. Anything else means a wrong mount, and adopting it (chown)
+ * would hand a foreign folder to the portal user. Returns the problem in
+ * German, or null when the folder looks right.
+ */
+export function checkUpdateDir(dir: string, owners: readonly number[] = [0, 1000]): string | null {
+  let entries: string[];
+  try {
+    const stat = lstatSync(dir);
+    if (stat.isSymbolicLink()) return `${dir} ist ein symbolischer Link`;
+    if (!stat.isDirectory()) return `${dir} ist kein Ordner`;
+    if (!owners.includes(stat.uid)) {
+      return `${dir} gehört Benutzer ${stat.uid}, erwartet ${owners.join(" oder ")}`;
+    }
+    entries = readdirSync(dir);
+  } catch (err) {
+    return `${dir} nicht lesbar: ${errorText(err)}`;
+  }
+  const foreign = entries.filter((name) => !PROTOCOL_FILES.has(name) && !TEMP_FILE.test(name)).sort();
+  if (foreign.length > 0) return `unerwartete Einträge in ${dir}: ${foreign.join(", ")}`;
+  return null;
 }
 
 /** Requests and statuses are tiny; anything bigger is not ours. */

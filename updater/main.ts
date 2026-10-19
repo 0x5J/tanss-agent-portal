@@ -1,13 +1,14 @@
 // Entry point of the updater container: wires the Docker API, the portal
 // health check and the file loop together.
-import { chownSync, mkdirSync } from "node:fs";
+import { lchownSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import { STATUS_FILE, type UpdateStatus } from "../shared/update.ts";
 import { createDockerApi } from "./docker.ts";
-import { createLoop, writeJsonAtomic } from "./loop.ts";
+import { checkUpdateDir, createLoop, writeJsonAtomic } from "./loop.ts";
 import { findPortalContainer, runUpdate } from "./update.ts";
 
 const TICK_MS = 5_000;
+const DIR_RECHECK_MS = 60_000;
 const HEALTH_FETCH_TIMEOUT_MS = 3_000;
 
 const dir = process.env.UPDATE_DIR || "/update";
@@ -31,13 +32,31 @@ async function health(url: string): Promise<string | null> {
   }
 }
 
-// The portal runs as uid 1000 and writes request.json here; a folder Docker
-// created as root would make that fail.
-try {
-  mkdirSync(dir, { recursive: true });
-  chownSync(dir, 1000, 1000);
-} catch (err) {
-  log(`Update-Ordner ${dir} konnte nicht übernommen werden: ${err instanceof Error ? err.message : String(err)}`);
+/**
+ * Checks the mounted folder and hands it to the portal user (uid 1000), which
+ * writes request.json there; a folder Docker created as root would make that
+ * fail. A folder that does not look like ours is never adopted.
+ */
+function adoptDir(): boolean {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    // checkUpdateDir reports what is wrong
+  }
+  const problem = checkUpdateDir(dir);
+  if (problem) {
+    log(
+      `FEHLER: Update-Ordner sieht nicht wie erwartet aus: ${problem}. ` +
+        `Der Updater bleibt untätig und prüft in ${DIR_RECHECK_MS / 1000} s erneut.`,
+    );
+    return false;
+  }
+  try {
+    lchownSync(dir, 1000, 1000);
+  } catch (err) {
+    log(`Update-Ordner ${dir} konnte nicht übernommen werden: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return true;
 }
 
 const docker = createDockerApi();
@@ -83,13 +102,25 @@ function tick(): void {
   });
 }
 
-log(`Updater ${version} bereit, Portal-Image ${repo}`);
-tick();
-const timer = setInterval(tick, TICK_MS);
+let timer: NodeJS.Timeout | null = null;
+
+// Without a heartbeat the portal shows "Der Updater läuft nicht"; the process
+// stays up idle, so `restart: unless-stopped` does not loop.
+function start(): void {
+  if (!adoptDir()) {
+    timer = setTimeout(start, DIR_RECHECK_MS);
+    return;
+  }
+  log(`Updater ${version} bereit, Portal-Image ${repo}`);
+  tick();
+  timer = setInterval(tick, TICK_MS);
+}
+
+start();
 
 // An update has its own rollback semantics, so stopping mid-update is acceptable.
 function stop(): void {
-  clearInterval(timer);
+  if (timer) clearInterval(timer);
   process.exit(0);
 }
 process.on("SIGTERM", stop);

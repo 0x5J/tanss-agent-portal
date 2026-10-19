@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   compareVersions,
@@ -115,15 +115,22 @@ export function createUpdateService(opts: {
 
     const req: UpdateRequest = { id: newId(), version, requestedAt: now() };
     const target = file(REQUEST_FILE);
-    const tmp = `${target}.tmp`;
+    // Hidden ".<name>.<uuid>.tmp": the only temp-file shape the updater
+    // accepts in this folder.
+    const tmp = file(`.${REQUEST_FILE}.${randomUUID()}.tmp`);
     try {
       mkdirSync(opts.dir, { recursive: true });
       // 0o644: the updater runs as a different user and must be able to read it
       // (chmod too, as the create mode is cut down by the umask).
-      writeFileSync(tmp, JSON.stringify(req), { mode: 0o644 });
+      writeFileSync(tmp, JSON.stringify(req), { mode: 0o644, flag: "wx" });
       chmodSync(tmp, 0o644);
       renameSync(tmp, target);
     } catch {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        // best effort
+      }
       throw new UpdateError(503, "Update-Ordner nicht beschreibbar");
     }
     return overview();
