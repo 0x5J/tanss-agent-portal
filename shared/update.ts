@@ -155,3 +155,23 @@ export function updateBanner(o: UpdateOverview, now: number): UpdateBanner | nul
   }
   return { tone: "info", text: head, action: "update" };
 }
+
+export type UpdateIndicator = {
+  tone: "idle" | "available" | "progress" | "error";
+  /** Short enough for the navigation footer. */
+  text: string;
+  /** The full sentence, for the tooltip. */
+  title: string;
+};
+
+/**
+ * The version line at the bottom of the navigation: the running version, or
+ * what is pending. Follows the banner, so both always tell the same story.
+ */
+export function updateIndicator(o: UpdateOverview | null, now: number, version: string): UpdateIndicator {
+  const banner = o ? updateBanner(o, now) : null;
+  if (!o || !banner) return { tone: "idle", text: version, title: `Agent-Portal ${version}` };
+  if (banner.tone === "progress") return { tone: "progress", text: "Update läuft", title: banner.text };
+  if (banner.tone === "error") return { tone: "error", text: "fehlgeschlagen", title: banner.text };
+  return { tone: "available", text: `${o.latest?.version ?? ""} verfügbar`, title: banner.text };
+}

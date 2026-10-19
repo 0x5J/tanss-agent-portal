@@ -18,6 +18,8 @@ type Props = {
   onError: (error: unknown) => void;
   onToast: (text: string) => void;
   onSaved: (settings: AgentSettings) => void;
+  /** A fresh check result, so the navigation shows it right away. */
+  onUpdateOverview: (overview: UpdateOverview) => void;
 };
 
 /**
@@ -237,7 +239,7 @@ export function SettingsView(props: Props) {
         <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen in den Freigaben.</span>
       </div>
 
-      <VersionSection onError={props.onError} onToast={props.onToast} />
+      <VersionSection onError={props.onError} onToast={props.onToast} onChecked={props.onUpdateOverview} />
     </div>
   );
 }
@@ -246,10 +248,14 @@ export function SettingsView(props: Props) {
  * Installed version plus the update check. Without an update service (the
  * routes answer 404) it is just the version line.
  */
-function VersionSection(props: { onError: (error: unknown) => void; onToast: (text: string) => void }) {
+function VersionSection(props: {
+  onError: (error: unknown) => void;
+  onToast: (text: string) => void;
+  onChecked: (overview: UpdateOverview) => void;
+}) {
   const [overview, setOverview] = useState<UpdateOverview | null>(null);
   const [checking, setChecking] = useState(false);
-  const { onError, onToast } = props;
+  const { onError, onToast, onChecked } = props;
 
   useEffect(() => {
     let cancelled = false;
@@ -269,6 +275,7 @@ function VersionSection(props: { onError: (error: unknown) => void; onToast: (te
     try {
       const next = await api.checkUpdate();
       setOverview(next);
+      onChecked(next);
       if (next.checkError) return;
       onToast(next.latest && next.latest.version !== next.current ? `Version ${next.latest.version} gefunden` : "Du bist auf dem neuesten Stand");
     } catch (error) {

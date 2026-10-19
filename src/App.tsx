@@ -12,6 +12,8 @@ import { LogView } from "./views/Log.tsx";
 import { ImportView } from "./views/Import.tsx";
 import { SettingsView } from "./views/Settings.tsx";
 import { UpdateBanner } from "./UpdateBanner.tsx";
+import { useUpdateOverview } from "./useUpdateOverview.ts";
+import { updateIndicator } from "../shared/update.ts";
 import { Palette } from "./Palette.tsx";
 import { AgentSidebar } from "./AgentSidebar.tsx";
 import type { TicketRow } from "../shared/tickets.ts";
@@ -156,6 +158,8 @@ export function App() {
     [showToast],
   );
 
+  const updates = useUpdateOverview(employeeId !== null, report);
+
   async function handleLogin(username: string, password: string, token: string) {
     setPending(true);
     setLoginError(null);
@@ -262,6 +266,7 @@ export function App() {
         tanssState={tanssDown ? "gestört" : meta ? "online" : "…"}
         agentModel={agent?.ready ? agent.model : ""}
         approvalCount={approvalCount}
+        update={updateIndicator(updates.overview, updates.now, __APP_VERSION__)}
         subtitle={subtitle}
         query={query}
         onQuery={setQuery}
@@ -295,7 +300,13 @@ export function App() {
                 </button>
               </div>
             ) : null}
-            <UpdateBanner onToast={showToast} onError={report} />
+            <UpdateBanner
+              overview={updates.overview}
+              now={updates.now}
+              onOverview={updates.replace}
+              onToast={showToast}
+              onError={report}
+            />
           </>
         }
       >
@@ -336,7 +347,13 @@ export function App() {
           />
         ) : null}
         {view === "settings" ? (
-          <SettingsView onSubtitle={setSubtitle} onError={report} onToast={showToast} onSaved={setAgent} />
+          <SettingsView
+            onSubtitle={setSubtitle}
+            onError={report}
+            onToast={showToast}
+            onSaved={setAgent}
+            onUpdateOverview={updates.replace}
+          />
         ) : null}
         {view === "times" ? (
           <TimesView
