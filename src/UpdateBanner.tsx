@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "./api.ts";
 import { isBusy, updateBanner, type UpdateOverview } from "../shared/update.ts";
+import { claimReload, sessionStore } from "./reload.ts";
 
 const IDLE_POLL_MS = 30 * 60_000;
 const BUSY_POLL_MS = 3_000;
@@ -22,7 +23,8 @@ type Props = {
 /**
  * The update notice above all views. It polls the overview itself — slowly
  * while idle, quickly while an update runs — and reloads the page once the
- * server reports another version than this bundle.
+ * server reports another version than this bundle (at most once per version
+ * and tab).
  */
 export function UpdateBanner(props: Props) {
   const [overview, setOverview] = useState<UpdateOverview | null>(null);
@@ -41,8 +43,9 @@ export function UpdateBanner(props: Props) {
       try {
         const next = await api.update();
         if (cancelled) return;
-        if (next.current !== __APP_VERSION__) {
-          // The new version is live; this bundle is stale.
+        if (next.current !== __APP_VERSION__ && claimReload(next.current, sessionStore())) {
+          // The new version is live; this bundle is stale. Once per version
+          // and tab: if the reload brings the same bundle back, it stays.
           location.reload();
           return;
         }
