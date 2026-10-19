@@ -4,6 +4,7 @@ import {
   isBusy,
   isVersion,
   updateBanner,
+  updateIndicator,
   type UpdateOverview,
   type UpdateStatus,
 } from "./update.ts";
@@ -260,5 +261,34 @@ describe("updateBanner", () => {
       NOW,
     );
     expect(banner).toBeNull();
+  });
+});
+
+describe("updateIndicator", () => {
+  it("shows the running version when nothing is pending", () => {
+    expect(updateIndicator(null, NOW, "0.1.0")).toMatchObject({ tone: "idle", text: "0.1.0" });
+    expect(updateIndicator(overview(), NOW, "0.1.0")).toMatchObject({ tone: "idle", text: "0.1.0" });
+  });
+
+  it("names the release on offer", () => {
+    const indicator = updateIndicator(overview({ latest: release("0.2.0") }), NOW, "0.1.0");
+    expect(indicator).toMatchObject({ tone: "available", text: "0.2.0 verfügbar", start: "0.2.0" });
+    expect(indicator.title).toContain("Version 0.2.0 verfügbar");
+  });
+
+  it("offers nothing to start without a running updater", () => {
+    const indicator = updateIndicator(overview({ updater: "missing", latest: release("0.2.0") }), NOW, "0.1.0");
+    expect(indicator).toMatchObject({ tone: "available", start: null });
+  });
+
+  it("follows the banner while an update runs and after it failed", () => {
+    const running = overview({ latest: release("0.2.0"), status: status({ state: "pulling" }) });
+    expect(updateIndicator(running, NOW, "0.1.0")).toMatchObject({ tone: "progress", start: null });
+    const failed = overview({ latest: release("0.2.0"), status: status({ state: "rolledBack" }) });
+    expect(updateIndicator(failed, NOW, "0.1.0")).toMatchObject({ tone: "error", text: "fehlgeschlagen" });
+  });
+
+  it("stays quiet when the check is switched off", () => {
+    expect(updateIndicator(overview({ enabled: false, latest: release("0.2.0") }), NOW, "0.1.0").tone).toBe("idle");
   });
 });

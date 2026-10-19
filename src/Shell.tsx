@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { UpdateIndicator } from "../shared/update.ts";
 
 export type View = "dashboard" | "tickets" | "approvals" | "times" | "analysis" | "import" | "log" | "settings";
 
@@ -12,6 +13,13 @@ const NAV: { id: View; label: string; key: string; icon: string }[] = [
   { id: "log", label: "Log", key: "G L", icon: "M6 3h9l4 4v14H6zM9 12h7M9 16h5" },
   { id: "settings", label: "Einstellungen", key: "G S", icon: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4" },
 ];
+
+const UPDATE_DOT: Record<UpdateIndicator["tone"], string> = {
+  idle: "flat",
+  available: "warn",
+  progress: "agent",
+  error: "danger",
+};
 
 const TITLES: Record<View, string> = {
   dashboard: "Dashboard",
@@ -33,6 +41,9 @@ type Props = {
   /** Model name when the local AI is set up, empty otherwise. */
   agentModel: string;
   approvalCount: number;
+  /** Running version or pending update; a click starts the update (after asking) or opens the settings. */
+  update: UpdateIndicator;
+  onStartUpdate: (version: string) => void;
   subtitle: string;
   query: string;
   onQuery: (query: string) => void;
@@ -86,6 +97,19 @@ export function Shell(props: Props) {
             <span>KI</span>
             <span className="state ellipsis">{props.agentModel || "aus"}</span>
           </div>
+          <button
+            className={`nav-status nav-version ${props.update.tone}`}
+            title={props.update.title}
+            onClick={() => {
+              const version = props.update.start;
+              if (version) props.onStartUpdate(version);
+              else props.onView("settings");
+            }}
+          >
+            <span className={`dot sm ${UPDATE_DOT[props.update.tone]}`} />
+            <span>Version</span>
+            <span className="state ellipsis">{props.update.text}</span>
+          </button>
           <button className="btn muted" style={{ justifyContent: "space-between" }} onClick={props.onToggleTheme}>
             <span>Erscheinungsbild</span>
             <span className="kbd">{props.theme === "dark" ? "dunkel" : "hell"}</span>

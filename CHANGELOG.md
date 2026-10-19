@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Versionszeile unten in der Navigation: zeigt die laufende Version oder ein
+  ausstehendes, laufendes oder fehlgeschlagenes Update. Steht ein Update
+  aus, startet ein Klick es nach derselben Rückfrage wie im Banner; sonst
+  öffnet er die Einstellungen.
+
 ## [0.2.0] – 2026-10-19
 
 ### Hinzugefügt

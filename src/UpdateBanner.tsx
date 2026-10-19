@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, ApiError } from "./api.ts";
-import { isBusy, updateBanner, type UpdateOverview } from "../shared/update.ts";
-import { claimReload, sessionStore } from "./reload.ts";
+import { useState } from "react";
+import { ApiError, api } from "./api.ts";
+import { updateBanner, type UpdateOverview } from "../shared/update.ts";
 
-const IDLE_POLL_MS = 30 * 60_000;
-const BUSY_POLL_MS = 3_000;
 const DISMISSED_KEY = "agent-portal.update.dismissed";
 
 function readDismissed(): string | null {
@@ -15,58 +12,50 @@ function readDismissed(): string | null {
   }
 }
 
+type StartHandlers = {
+  onOverview: (next: UpdateOverview) => void;
+  onToast: (text: string) => void;
+  onError: (error: unknown) => void;
+  /** True while the start request runs; only after the user said yes. */
+  onBusy?: (busy: boolean) => void;
+};
+
+/**
+ * Asks before anything happens, then hands the version to the updater. The
+ * banner button and the version line in the navigation both come here.
+ * Returns once the request is answered, whatever the outcome.
+ */
+export async function confirmAndStartUpdate(version: string, handlers: StartHandlers): Promise<void> {
+  const ok = window.confirm(
+    `Das Portal startet dabei neu und ist etwa eine Minute nicht erreichbar. Jetzt auf ${version} aktualisieren?`,
+  );
+  if (!ok) return;
+  handlers.onBusy?.(true);
+  try {
+    handlers.onOverview(await api.startUpdate(version));
+  } catch (error) {
+    // 409 / 503 carry a sentence for the user; report() would mistake 503 for TANSS being down.
+    if (error instanceof ApiError && (error.status === 409 || error.status === 503)) handlers.onToast(error.message);
+    else handlers.onError(error);
+  } finally {
+    handlers.onBusy?.(false);
+  }
+}
+
 type Props = {
+  /** From useUpdateOverview; null shows nothing. */
+  overview: UpdateOverview | null;
+  now: number;
+  onOverview: (next: UpdateOverview) => void;
   onToast: (text: string) => void;
   onError: (error: unknown) => void;
 };
 
-/**
- * The update notice above all views. It polls the overview itself — slowly
- * while idle, quickly while an update runs — and reloads the page once the
- * server reports another version than this bundle (at most once per version
- * and tab).
- */
+/** The update notice above all views. */
 export function UpdateBanner(props: Props) {
-  const [overview, setOverview] = useState<UpdateOverview | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
   const [starting, setStarting] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  const { onToast, onError } = props;
-  const busy = overview !== null && isBusy(overview, now);
-
-  // Poll right away and again on an interval: slow while idle, fast while an
-  // update runs. The effect restarts whenever `busy` flips.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function poll() {
-      try {
-        const next = await api.update();
-        if (cancelled) return;
-        if (next.current !== __APP_VERSION__ && claimReload(next.current, sessionStore())) {
-          // The new version is live; this bundle is stale. Once per version
-          // and tab: if the reload brings the same bundle back, it stays.
-          location.reload();
-          return;
-        }
-        setOverview(next);
-        setNow(Date.now());
-      } catch (error) {
-        if (cancelled) return;
-        // 404: no update service here. While busy the portal is restarting,
-        // so failures are expected. Otherwise stay quiet too, except for a
-        // lost session.
-        if (!busy && error instanceof ApiError && error.status === 401) onError(error);
-      }
-    }
-
-    void poll();
-    const id = window.setInterval(() => void poll(), busy ? BUSY_POLL_MS : IDLE_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [busy, onError]);
+  const { overview, now, onOverview, onToast, onError } = props;
 
   if (!overview) return null;
   const banner = updateBanner(overview, now);
@@ -76,23 +65,9 @@ export function UpdateBanner(props: Props) {
 
   const latest = overview.latest;
 
-  async function start() {
+  function start() {
     if (!latest) return;
-    const ok = window.confirm(
-      `Das Portal startet dabei neu und ist etwa eine Minute nicht erreichbar. Jetzt auf ${latest.version} aktualisieren?`,
-    );
-    if (!ok) return;
-    setStarting(true);
-    try {
-      setOverview(await api.startUpdate(latest.version));
-      setNow(Date.now());
-    } catch (error) {
-      // 409 / 503 carry a sentence for the user; report() would mistake 503 for TANSS being down.
-      if (error instanceof ApiError && (error.status === 409 || error.status === 503)) onToast(error.message);
-      else onError(error);
-    } finally {
-      setStarting(false);
-    }
+    void confirmAndStartUpdate(latest.version, { onOverview, onToast, onError, onBusy: setStarting });
   }
 
   function dismiss() {
@@ -116,7 +91,7 @@ export function UpdateBanner(props: Props) {
           </a>
         ) : null}
         {banner.action === "update" && latest ? (
-          <button className="btn primary" disabled={starting} onClick={() => void start()}>
+          <button className="btn primary" disabled={starting} onClick={start}>
             Jetzt aktualisieren
           </button>
         ) : null}
