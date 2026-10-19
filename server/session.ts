@@ -3,7 +3,10 @@ import { getIronSession, type SessionOptions } from "iron-session";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { TanssSession } from "./tanss.ts";
 
-export type SessionData = Partial<TanssSession>;
+export type SessionData = Partial<TanssSession> & {
+  /** The store's session generation at login; a logout moves past it. */
+  generation?: number;
+};
 
 export function sessionOptions(password: string): SessionOptions {
   return {

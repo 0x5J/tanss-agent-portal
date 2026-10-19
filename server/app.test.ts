@@ -113,6 +113,26 @@ describe("login", () => {
   });
 });
 
+describe("logout", () => {
+  it("revokes the cookie server-side, copies included", async () => {
+    const { client } = fakeTanss();
+    const { app, cookie } = await loggedIn(client);
+    const get = (url: string, c: string) => app.inject({ method: "GET", url, headers: { cookie: c } });
+    expect((await get("/auth/me", cookie)).statusCode).toBe(200);
+    // The browser drops its cookie on logout; a copy taken before must not live on.
+    await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie } });
+    expect((await get("/auth/me", cookie)).statusCode).toBe(401);
+    expect((await get("/me/session", cookie)).statusCode).toBe(401);
+    expect((await get("/me/tickets", cookie)).statusCode).toBe(401);
+    // Logging in again hands out a cookie that works.
+    const again = await app.inject({ method: "POST", url: "/auth/login", payload: { username: "sb", password: "pw", token: "123456" } });
+    const raw = again.headers["set-cookie"];
+    const fresh = Array.isArray(raw) ? raw[0] : String(raw ?? "");
+    expect((await get("/auth/me", fresh)).statusCode).toBe(200);
+    expect((await get("/auth/me", cookie)).statusCode).toBe(401);
+  });
+});
+
 describe("tickets", () => {
   it("loads the projects list alongside the board", async () => {
     const kinds: string[] = [];

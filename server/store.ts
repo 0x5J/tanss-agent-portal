@@ -30,6 +30,12 @@ export type StoredSession = {
 export type Store = {
   session(): StoredSession | null;
   setSession(session: StoredSession | null): void;
+  /**
+   * Which login cookies still count, per employee: a cookie carries the
+   * generation it was issued in, and logging out moves to the next one.
+   */
+  sessionGeneration(employeeId: number): number;
+  bumpSessionGeneration(employeeId: number): number;
   llm(): LlmSettings;
   setLlm(settings: LlmSettings): void;
   proposals(employeeId: number): Proposal[];
@@ -93,10 +99,17 @@ export function createMemoryStore(): Store {
   const claims = new Map<number, ClaimEntry[]>();
   const reportLists = new Map<number, string[]>();
   const reports = new Map<number, Map<string, string>>();
+  const generations = new Map<number, number>();
   return {
     session: () => (session ? { ...session } : null),
     setSession: (s) => {
       session = s ? { ...s } : null;
+    },
+    sessionGeneration: (employeeId) => generations.get(employeeId) ?? 0,
+    bumpSessionGeneration: (employeeId) => {
+      const next = (generations.get(employeeId) ?? 0) + 1;
+      generations.set(employeeId, next);
+      return next;
     },
     llm: () => ({ ...llm }),
     setLlm: (s) => {
@@ -186,6 +199,12 @@ export function createFileStore(dir: string): Store {
       Number(id),
       (Array.isArray(raw) ? raw : []).filter((k): k is string => typeof k === "string").slice(0, 20),
     ]),
+  );
+  const generationsPath = path.join(dir, "session-generations.json");
+  const generations = new Map<number, number>(
+    Object.entries(read<Record<string, unknown>>(generationsPath, {}))
+      .filter(([, raw]) => Number.isInteger(raw))
+      .map(([id, raw]) => [Number(id), raw as number]),
   );
   const reportDir = (employeeId: number) => path.join(reportsDir, String(employeeId));
   // A report name is built by us, but it ends up in a path — never let a
@@ -328,6 +347,13 @@ export function createFileStore(dir: string): Store {
     setReportLists: (employeeId, keys) => {
       reportLists.set(employeeId, keys);
       write(reportListsPath, asRecord(reportLists), 0o600);
+    },
+    sessionGeneration: (employeeId) => generations.get(employeeId) ?? 0,
+    bumpSessionGeneration: (employeeId) => {
+      const next = (generations.get(employeeId) ?? 0) + 1;
+      generations.set(employeeId, next);
+      write(generationsPath, asRecord(generations), 0o600);
+      return next;
     },
     saveReport: (employeeId, name, html) => {
       if (!safeName(name)) return;

@@ -63,7 +63,9 @@ Ticketlisten (nur Lesen) und hält sie dabei am Leben. **Es liegt kein Passwort
 und kein 2FA-Seed für den Sammler auf dem Server**, also kann auch kein
 automatischer Fehlversuch ein TANSS-Konto sperren. Grenze: Der Refresh-Token
 gilt laut API-Spec 5 Tage; war der Container so lange aus, meldest du dich
-einmal neu an. „Abmelden" beendet nur den Browser — der Sammler läuft weiter,
+einmal neu an. „Abmelden" macht alle Browser-Cookies dieses Kontos ungültig,
+auch Kopien davon (der Server zählt dafür je Konto eine Generation in
+`DATA_DIR/session-generations.json` hoch). Der Sammler läuft weiter;
 `Einstellungen → Dashboard-Sammler` zeigt seinen Zustand und stoppt ihn.
 
 > **Achtung bei Sonderzeichen.** Docker liest die `.env` selbst ein: `$` löst

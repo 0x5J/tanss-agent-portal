@@ -43,7 +43,7 @@ import {
   type BookingTemplate,
 } from "../shared/template.ts";
 import { createCallLog, loggableBody, type CallLog } from "./log.ts";
-import { readSession, requireEmployee, requireSession } from "./session.ts";
+import { readSession, requireEmployee, requireSession, type SessionData } from "./session.ts";
 import { createSharedSession, type SharedSession } from "./shared-session.ts";
 import { LinearError, type LinearClient } from "./linear.ts";
 import { buildSuggestions, importKey, parseRules } from "../shared/import.ts";
@@ -228,7 +228,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     work: (session: TanssSession) => Promise<T>,
   ): Promise<T> {
     const cookie = await readSession(request, reply, secret);
-    const employeeId = requireEmployee(cookie);
+    const employeeId = current(cookie);
     // A cookie from before the shared session still carries a token pair;
     // hand it over once, then it lives server-side like everyone else's.
     if (!shared.state(Math.floor(now() / 1000)).present && cookie.apiKey && cookie.refresh) {
@@ -252,6 +252,24 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     }
   }
 
+  /**
+   * The employee a cookie names, as long as it was issued after their last
+   * logout. The cookie is sealed but stateless, so the generation in the
+   * store is what lets a logout revoke copies of it too. A cookie from before
+   * generations existed counts as generation 0.
+   */
+  function current(cookie: SessionData): number {
+    const employeeId = requireEmployee(cookie);
+    if ((cookie.generation ?? 0) !== store.sessionGeneration(employeeId)) {
+      throw new TanssError("Nicht angemeldet", 401);
+    }
+    return employeeId;
+  }
+
+  async function employee(request: FastifyRequest, reply: FastifyReply): Promise<number> {
+    return current(await readSession(request, reply, secret));
+  }
+
   // --- auth ------------------------------------------------------------------
 
   app.get("/health", async () => ({ ok: true }));
@@ -265,7 +283,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   app.get("/auth/me", async (request, reply) => {
     const cookie = await readSession(request, reply, secret);
-    if (!cookie.employeeId) {
+    if (!cookie.employeeId || (cookie.generation ?? 0) !== store.sessionGeneration(cookie.employeeId)) {
       return reply.code(401).send({ error: "Nicht angemeldet" });
     }
     const state = shared.state(Math.floor(now() / 1000));
@@ -316,6 +334,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       opts.onLogin?.();
       const session = await readSession(request, reply, secret);
       session.employeeId = tokens.employeeId;
+      session.generation = store.sessionGeneration(tokens.employeeId);
       session.apiKey = undefined;
       session.refresh = undefined;
       session.expire = undefined;
@@ -325,18 +344,21 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   );
 
   /**
-   * Logging out ends this browser's session. The stored TANSS session stays,
-   * so the dashboard collector keeps measuring — "Sammler stoppen" in the
-   * settings is what ends that one.
+   * Logging out ends every browser's cookie for this employee, including
+   * copies of it. The stored TANSS session stays, so the dashboard collector
+   * keeps measuring — "Sammler stoppen" in the settings is what ends that one.
    */
   app.post("/auth/logout", async (request, reply) => {
     const session = await readSession(request, reply, secret);
+    // Only a cookie that still counts may log everyone out; a revoked one just goes.
+    const valid = session.employeeId && (session.generation ?? 0) === store.sessionGeneration(session.employeeId);
+    if (valid) store.bumpSessionGeneration(session.employeeId!);
     session.destroy();
     return { ok: true };
   });
 
   app.get("/me/session", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const state = shared.state(Math.floor(now() / 1000));
     return {
       present: state.present && state.employeeId === employeeId,
@@ -347,7 +369,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.delete("/me/session", async (request, reply) => {
-    requireEmployee(await readSession(request, reply, secret));
+    await employee(request, reply);
     shared.clear();
     return { ok: true };
   });
@@ -771,12 +793,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // --- saved lists & dashboard ----------------------------------------------
 
   app.get("/me/views", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     return { views: store.views(employeeId) };
   });
 
   app.put("/me/views", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const body = (request.body ?? {}) as { views?: unknown };
     // The tolerant parser is the schema: broken entries are dropped, and what
     // comes back is exactly what will be stored.
@@ -796,7 +818,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   }
 
   app.get("/me/import/states", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const rules = store.importRules(employeeId);
     if (!opts.linear) return { enabled: false, items: [], rules };
     const items = await linearOrFail().workflowStates();
@@ -813,14 +835,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.put("/me/import/rules", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const rules = parseRules((request.body as { rules?: unknown })?.rules);
     store.setImportRules(employeeId, rules);
     return { rules };
   });
 
   app.put("/me/import/mappings", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const body = (request.body ?? {}) as { key?: unknown; target?: unknown; mappings?: unknown };
     if (typeof body.key === "string" && body.key.trim()) {
       const target = parseTarget(body.target);
@@ -923,24 +945,24 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get("/me/style", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     return { style: store.style(employeeId) };
   });
 
   app.put("/me/style", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const style = parseStyle((request.body as { style?: unknown })?.style);
     store.setStyle(employeeId, style);
     return { style };
   });
 
   app.get("/me/reports", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     return { reports: store.reports(employeeId), lists: store.reportLists(employeeId) };
   });
 
   app.put("/me/reports/lists", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const raw = (request.body as { lists?: unknown })?.lists;
     const lists = (Array.isArray(raw) ? raw : [])
       .filter((k): k is string => typeof k === "string" && k.length > 0 && k.length <= 60)
@@ -950,14 +972,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get("/me/reports/:name", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const html = store.report(employeeId, String((request.params as { name: string }).name));
     if (html === null) return reply.code(404).send({ error: "Bericht nicht gefunden" });
     return reply.type("text/html; charset=utf-8").send(html);
   });
 
   app.get("/me/dashboard/claims", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const raw = String((request.query as { since?: string }).since ?? "");
     const since = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : shiftYmd(berlinYmd(Math.floor(now() / 1000)), -30);
     // Both sources: the running log, plus whatever the measurement file still
@@ -971,12 +993,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get("/me/routines", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     return { routines: store.routines(employeeId) };
   });
 
   app.put("/me/routines", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     const body = (request.body ?? {}) as { routines?: unknown };
     // The tolerant reader is the schema: a reversed range gets corrected, an
     // entry without text is dropped, and what comes back is what was stored.
@@ -986,7 +1008,7 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   });
 
   app.get("/me/dashboard", async (request, reply) => {
-    const employeeId = requireEmployee(await readSession(request, reply, secret));
+    const employeeId = await employee(request, reply);
     return {
       days: store.dashboard(employeeId),
       polling: opts.polling === true,
@@ -1010,14 +1032,14 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // --- log -------------------------------------------------------------------
 
   app.get("/me/log", async (request, reply) => {
-    requireEmployee(await readSession(request, reply, secret));
+    await employee(request, reply);
     const raw = Number((request.query as { since?: string }).since ?? 0);
     const since = Number.isFinite(raw) && raw >= 0 ? raw : 0;
     return { entries: log.since(since), lastId: log.lastId() };
   });
 
   app.delete("/me/log", async (request, reply) => {
-    requireEmployee(await readSession(request, reply, secret));
+    await employee(request, reply);
     log.clear();
     return { ok: true };
   });

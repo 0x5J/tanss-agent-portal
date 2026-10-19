@@ -172,8 +172,19 @@ describe("the login seeds the collector", () => {
     const cookie = Array.isArray(raw) ? raw[0] : String(raw ?? "");
     await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie } });
     expect(store.session()).not.toBeNull();
-    // "Sammler stoppen" is the explicit way out.
-    const stop = await app.inject({ method: "DELETE", url: "/me/session", headers: { cookie } });
+    // "Sammler stoppen" is the explicit way out — after logging in again, since
+    // the old cookie no longer counts.
+    const again = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { username: "sb", password: "pw", token: "123456" },
+    });
+    const fresh = again.headers["set-cookie"];
+    const stop = await app.inject({
+      method: "DELETE",
+      url: "/me/session",
+      headers: { cookie: Array.isArray(fresh) ? fresh[0] : String(fresh ?? "") },
+    });
     expect(stop.statusCode).toBe(200);
     expect(store.session()).toBeNull();
   });
