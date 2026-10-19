@@ -1,3 +1,4 @@
+import type { UpdateChannel } from "../shared/update.ts";
 import { parseTotpConfig, type TotpConfig } from "./totp.ts";
 
 export type ServerConfig = {
@@ -20,6 +21,10 @@ export type ServerConfig = {
   tanssCredentials: { username: string; password: string } | null;
   /** Personal Linear API key; without it the import tab says so. */
   linearApiKey: string;
+  /** Which releases the update check offers: only final ones, or staging pre-releases too. */
+  updateChannel: UpdateChannel;
+  /** False (UPDATE_CHECK=0) keeps the portal from asking GitHub for releases. */
+  updateCheck: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -61,7 +66,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     dataDir: env.DATA_DIR || "data",
     tanssCredentials: parseCredentials(env.TANSS_USERNAME, env.TANSS_PASSWORD),
     linearApiKey: (env.LINEAR_API_KEY ?? "").trim(),
+    updateChannel: parseUpdateChannel(env.UPDATE_CHANNEL),
+    updateCheck: env.UPDATE_CHECK !== "0",
   };
+}
+
+function parseUpdateChannel(raw: string | undefined): UpdateChannel {
+  const value = (raw ?? "").trim();
+  if (!value) return "stable";
+  if (value === "stable" || value === "staging") return value;
+  throw new Error("UPDATE_CHANNEL muss stable oder staging sein");
 }
 
 function parseCredentials(

@@ -55,6 +55,7 @@ import { generateTotp, secondsUntilNextCode, type TotpConfig } from "./totp.ts";
 import { registerAgentRoutes } from "./agent.ts";
 import { LlmError, createLlmClient, type LlmClient } from "./llm.ts";
 import { createMemoryStore, type Store } from "./store.ts";
+import { UpdateError, type UpdateService } from "./updates.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -77,6 +78,8 @@ export type AppOptions = {
   shared?: SharedSession;
   /** Linear connection for the day import; absent means "not configured". */
   linear?: LinearClient;
+  /** One-click updates; absent means the update routes answer 404. */
+  updates?: UpdateService;
   /** Called after a login seeded the session — the collector measures at once. */
   onLogin?: () => void;
   /** Called after an assignment changed here, so the dashboard sees it now. */
@@ -207,7 +210,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
 
   app.setErrorHandler((raw, _request, reply) => {
     const error: unknown = raw;
-    if (error instanceof TanssError || error instanceof LlmError || error instanceof LinearError) {
+    if (
+      error instanceof TanssError ||
+      error instanceof LlmError ||
+      error instanceof LinearError ||
+      error instanceof UpdateError
+    ) {
       return reply.code(error.status).send({ error: error.message });
     }
     const status = (error as { statusCode?: number }).statusCode ?? 500;
@@ -807,6 +815,38 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     if (views.length > 50) return reply.code(400).send({ error: "Zu viele Listen" });
     store.setViews(employeeId, views);
     return { views };
+  });
+
+  // --- updates ---------------------------------------------------------------
+
+  const updateRequestSchema = z.object({ version: z.string().min(1) });
+
+  async function updatesOrFail(request: FastifyRequest, reply: FastifyReply): Promise<UpdateService | null> {
+    await employee(request, reply);
+    if (opts.updates) return opts.updates;
+    void reply.code(404).send({ error: "Updates nicht eingerichtet" });
+    return null;
+  }
+
+  app.get("/me/update", async (request, reply) => {
+    const updates = await updatesOrFail(request, reply);
+    if (!updates) return reply;
+    return updates.overview();
+  });
+
+  app.post("/me/update/check", async (request, reply) => {
+    const updates = await updatesOrFail(request, reply);
+    if (!updates) return reply;
+    return updates.check();
+  });
+
+  app.post("/me/update", async (request, reply) => {
+    const updates = await updatesOrFail(request, reply);
+    if (!updates) return reply;
+    const parsed = updateRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Version fehlt" });
+    // A refused request (409 / 503) is an UpdateError, answered by the error handler.
+    return updates.request(parsed.data.version);
   });
 
   // --- day import (Linear) ---------------------------------------------------
