@@ -14,6 +14,7 @@ const COMPOSE_PROJECT = "com.docker.compose.project";
 const COMPOSE_SERVICE = "com.docker.compose.service";
 const COMPOSE_IMAGE = "com.docker.compose.image";
 const MANUAL_UPDATE = "docker compose pull && docker compose up -d";
+const IN_PROGRESS: readonly UpdateState[] = ["pulling", "starting", "checking"];
 
 export interface UpdateDeps {
   docker: DockerApi;
@@ -59,7 +60,10 @@ function healthUrl(ip: string, port: number): string {
   return `http://${ip}:${port}/health`;
 }
 
-async function askHealth(deps: UpdateDeps, url: string): Promise<string | null> {
+/** What recovering an interrupted update needs; no request, no repo. */
+export type RecoverDeps = Pick<UpdateDeps, "docker" | "health" | "report" | "now" | "sleep" | "healthTimeoutMs">;
+
+async function askHealth(deps: RecoverDeps, url: string): Promise<string | null> {
   try {
     return await deps.health(url);
   } catch {
@@ -67,17 +71,34 @@ async function askHealth(deps: UpdateDeps, url: string): Promise<string | null> 
   }
 }
 
-/** The portal container of the updater's own compose project. */
-export async function findPortalContainer(docker: DockerApi, selfId: string): Promise<string> {
+function isPrevious(c: { Names: string[] }): boolean {
+  return c.Names.some((n) => n.endsWith(PREVIOUS_SUFFIX));
+}
+
+/** All containers of the portal service in the updater's own compose project. */
+async function portalContainers(docker: DockerApi, selfId: string): Promise<{ Id: string; Names: string[] }[]> {
   const self = await docker.inspectContainer(selfId);
   const project = self.Config.Labels?.[COMPOSE_PROJECT];
   if (!project) throw new Error("Updater läuft nicht unter Docker Compose");
-  const found = await docker.listContainers({ [COMPOSE_PROJECT]: project, [COMPOSE_SERVICE]: "portal" });
+  return docker.listContainers({ [COMPOSE_PROJECT]: project, [COMPOSE_SERVICE]: "portal" });
+}
+
+/** The portal container of the updater's own compose project. */
+export async function findPortalContainer(docker: DockerApi, selfId: string): Promise<string> {
   // A "-vorher" container is the leftover of an interrupted update, not the portal.
-  const portals = found.filter((c) => !c.Names.some((n) => n.endsWith(PREVIOUS_SUFFIX)));
+  const portals = (await portalContainers(docker, selfId)).filter((c) => !isPrevious(c));
   if (portals.length === 0) throw new Error("Portal-Container nicht gefunden");
   if (portals.length > 1) throw new Error("mehrere Portal-Container gefunden");
   return portals[0]!.Id;
+}
+
+/** True when the container carries the "-vorher" name, false also when it cannot be inspected. */
+async function carriesPreviousName(docker: DockerApi, id: string): Promise<boolean> {
+  try {
+    return (await docker.inspectContainer(id)).Name.endsWith(PREVIOUS_SUFFIX);
+  } catch {
+    return false;
+  }
 }
 
 export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promise<UpdateStatus> {
@@ -146,6 +167,7 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
 
   // From here on every completed step is recorded so a failure undoes exactly that.
   const name = spec.name;
+  let renameAttempted = false;
   let renamed = false;
   let createAttempted = false;
   let newId: string | null = null;
@@ -154,6 +176,7 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   try {
     report("starting", "Portal startet neu");
     await docker.stopContainer(old.Id, STOP_TIMEOUT_SECONDS);
+    renameAttempted = true;
     await docker.renameContainer(old.Id, `${name}${PREVIOUS_SUFFIX}`);
     renamed = true;
     createAttempted = true;
@@ -181,6 +204,9 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
       // otherwise, as the old container carries the "-vorher" name.
       await docker.removeContainer(name).catch(() => {});
     }
+    // The daemon may have renamed despite an error on our side (e.g. a
+    // dropped connection): ask it instead of trusting the call.
+    if (!renamed && renameAttempted) renamed = await carriesPreviousName(docker, old.Id);
     if (renamed) await docker.renameContainer(old.Id, name);
     await docker.startContainer(old.Id);
   } catch (err) {
@@ -192,17 +218,21 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   return report("rolledBack", cause);
 }
 
-/** Polls /health of the new container; returns null on success, else the reason. */
-async function waitForVersion(
-  deps: UpdateDeps,
+/**
+ * Polls /health of a container until `accept` takes an answer or the health
+ * timeout runs out. Returns the container's IP (empty if it never got one) and
+ * the accepted or else the last answer.
+ */
+async function pollHealth(
+  deps: RecoverDeps,
   id: string,
   port: number,
-  version: string,
-): Promise<string | null> {
+  accept: (answer: string) => boolean,
+): Promise<{ ip: string; answer: string | null }> {
   const timeout = deps.healthTimeoutMs ?? HEALTH_TIMEOUT_MS;
   const started = deps.now();
   let ip = "";
-  let reported: string | null = null;
+  let last: string | null = null;
   for (;;) {
     if (!ip) {
       try {
@@ -213,27 +243,42 @@ async function waitForVersion(
     }
     if (ip) {
       const answer = await askHealth(deps, healthUrl(ip, port));
-      if (answer === version) return null;
-      if (answer) reported = answer;
+      if (answer) {
+        last = answer;
+        if (accept(answer)) break;
+      }
     }
     if (deps.now() - started >= timeout) break;
     await deps.sleep(HEALTH_INTERVAL_MS);
   }
+  return { ip, answer: last };
+}
+
+/** Polls /health of the new container; returns null on success, else the reason. */
+async function waitForVersion(
+  deps: UpdateDeps,
+  id: string,
+  port: number,
+  version: string,
+): Promise<string | null> {
+  const { ip, answer } = await pollHealth(deps, id, port, (a) => a === version);
+  if (answer === version) return null;
   if (!ip) return "neuer Container bekommt keine IP-Adresse";
-  if (reported) return `neue Version meldet ${reported} statt ${version}`;
+  if (answer) return `neue Version meldet ${answer} statt ${version}`;
   return "neue Version antwortet nicht";
 }
 
 /** The new version is healthy: cleanup problems are reported but never roll back. */
 async function finish(
-  deps: UpdateDeps,
+  deps: RecoverDeps,
   report: (state: UpdateState, message: string) => UpdateStatus,
   oldId: string,
   imageRef: string,
   oldImageRef: string,
   version: string,
+  notes: string[] = [],
 ): Promise<UpdateStatus> {
-  const problems: string[] = [];
+  const problems = [...notes];
   try {
     await deps.docker.removeContainer(oldId);
   } catch (err) {
@@ -255,4 +300,82 @@ async function finish(
 
   const done = `Update auf ${version} abgeschlossen`;
   return report("done", problems.length ? `${done} (${problems.join("; ")})` : done);
+}
+
+/**
+ * Runs once at updater start, before the loop: an update the updater was
+ * killed in the middle of (stop, crash, host restart) is finished or undone.
+ * Returns the new status, or null when there was nothing to recover.
+ */
+export async function recoverInterrupted(
+  deps: RecoverDeps,
+  selfId: string,
+  status: UpdateStatus | null,
+): Promise<UpdateStatus | null> {
+  const { docker } = deps;
+  const found = await portalContainers(docker, selfId);
+  const previous = found.find(isPrevious) ?? null;
+  const open = status !== null && IN_PROGRESS.includes(status.state);
+  if (!previous && !open) return null;
+
+  const to = status?.to ?? "";
+  function report(state: UpdateState, message: string): UpdateStatus {
+    const next: UpdateStatus = {
+      id: status?.id ?? "",
+      state,
+      from: status?.from || "unbekannt",
+      to,
+      message,
+      at: deps.now(),
+    };
+    try {
+      deps.report(next);
+    } catch {
+      // A status that cannot be written must not stop the recovery.
+    }
+    return next;
+  }
+
+  const currents = found.filter((c) => !isPrevious(c));
+  if (currents.length > 1) {
+    return report("failed", "Update unterbrochen: mehrere Portal-Container gefunden — bitte `docker compose up -d` ausführen");
+  }
+
+  try {
+    const current = currents[0] ? await docker.inspectContainer(currents[0].Id) : null;
+    // A stopped container cannot answer; do not wait the full timeout for it.
+    const running = current !== null && current.State?.Running !== false;
+    const answer =
+      running && isVersion(to) ? (await pollHealth(deps, current.Id, portalPort(current), () => true)).answer : null;
+
+    if (current && answer === to) {
+      const note = "nach Unterbrechung";
+      if (!previous) return report("done", `Update auf ${to} abgeschlossen (${note})`);
+      const old = await docker.inspectContainer(previous.Id);
+      return finish(deps, report, previous.Id, current.Config.Image, old.Config.Image, to, [note]);
+    }
+
+    if (previous) {
+      const name = (previous.Names.find((n) => n.endsWith(PREVIOUS_SUFFIX)) ?? "")
+        .replace(/^\//, "")
+        .slice(0, -PREVIOUS_SUFFIX.length);
+      try {
+        if (current) await docker.removeContainer(current.Id);
+        await docker.renameContainer(previous.Id, name);
+        await docker.startContainer(previous.Id);
+      } catch (err) {
+        return report(
+          "failed",
+          `Update unterbrochen, Wiederherstellung fehlgeschlagen: ${errorText(err)} — bitte \`docker compose up -d\` ausführen`,
+        );
+      }
+      return report("rolledBack", "Update unterbrochen, vorherige Version wiederhergestellt");
+    }
+
+    // Interrupted between stopping the old container and renaming it.
+    if (current && !running) await docker.startContainer(current.Id);
+    return report("failed", "Update unterbrochen");
+  } catch (err) {
+    return report("failed", `Update unterbrochen: ${errorText(err)} — bitte \`docker compose up -d\` ausführen`);
+  }
 }

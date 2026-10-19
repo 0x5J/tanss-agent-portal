@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { UpdateRequest, UpdateStatus } from "../shared/update.ts";
-import { checkUpdateDir, createLoop } from "./loop.ts";
+import { checkUpdateDir, createLoop, readStatus } from "./loop.ts";
 
 let dir: string;
 
@@ -342,5 +342,31 @@ describe("checkUpdateDir", () => {
 
   it("rejects a missing folder", () => {
     expect(checkUpdateDir(path.join(dir, "gone"), [me])).toContain("nicht lesbar");
+  });
+});
+
+describe("readStatus", () => {
+  it("reads a status written by the updater", () => {
+    writeFileSync(path.join(dir, "status.json"), JSON.stringify(done("r1")));
+    expect(readStatus(dir)).toEqual(done("r1"));
+  });
+
+  it("gives null for a missing, garbled or wrongly shaped file", () => {
+    expect(readStatus(dir)).toBeNull();
+    writeFileSync(path.join(dir, "status.json"), "{ nicht json");
+    expect(readStatus(dir)).toBeNull();
+    writeFileSync(path.join(dir, "status.json"), JSON.stringify({ id: "r1", state: "unterwegs", to: "0.2.0" }));
+    expect(readStatus(dir)).toBeNull();
+  });
+
+  it("does not follow a symlinked status.json", () => {
+    const outside = mkdtempSync(path.join(tmpdir(), "updater-outside-"));
+    try {
+      writeFileSync(path.join(outside, "status.json"), JSON.stringify(done("r1")));
+      symlinkSync(path.join(outside, "status.json"), path.join(dir, "status.json"));
+      expect(readStatus(dir)).toBeNull();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UpdateStatus } from "../shared/update.ts";
 import { type ContainerInfo, type DockerApi, DockerError, type ImageInfo } from "./docker.ts";
-import { findPortalContainer, runUpdate } from "./update.ts";
+import { findPortalContainer, recoverInterrupted, runUpdate } from "./update.ts";
 
 const REPO = "ghcr.io/0x5j/tanss-agent-portal";
 const OLD_ID = "0ld0ld0ld0ld0ld0ld0ld0ld";
@@ -46,6 +46,7 @@ function newContainer(ip: string): ContainerInfo {
   return {
     ...c,
     Id: NEW_ID,
+    Config: { ...c.Config, Image: `${REPO}:0.2.0` },
     NetworkSettings: {
       Networks: {
         proxy: { IPAddress: ip ? "172.19.0.9" : "", Aliases: ["portal"] },
@@ -66,11 +67,16 @@ function fakeDocker(
     list?: { Id: string; Names: string[] }[];
     newIps?: string[];
     fail?: Partial<Record<Method, Failure>>;
+    /** The daemon renames the old container even though the call reports an error. */
+    applyFailedRename?: boolean;
+    oldRunning?: boolean;
+    newRunning?: boolean;
   } = {},
 ) {
   const calls: Call[] = [];
   const old = opts.old ?? oldContainer();
   const newIps = [...(opts.newIps ?? [NEW_IP])];
+  let oldName = old.Name;
 
   function record(method: Method, ...args: unknown[]) {
     calls.push([method, ...args]);
@@ -82,8 +88,14 @@ function fakeDocker(
   const docker: DockerApi = {
     async inspectContainer(id) {
       record("inspectContainer", id);
-      if (id === OLD_ID) return structuredClone(old);
-      if (id === NEW_ID) return newContainer(newIps.length > 1 ? newIps.shift()! : (newIps[0] ?? ""));
+      if (id === OLD_ID) {
+        const c = { ...structuredClone(old), Name: oldName };
+        return opts.oldRunning === undefined ? c : { ...c, State: { Running: opts.oldRunning } };
+      }
+      if (id === NEW_ID) {
+        const c = newContainer(newIps.length > 1 ? newIps.shift()! : (newIps[0] ?? ""));
+        return opts.newRunning === undefined ? c : { ...c, State: { Running: opts.newRunning } };
+      }
       if (id === SELF_ID && opts.self) return structuredClone(opts.self);
       throw new DockerError(`No such container: ${id}`, 404);
     },
@@ -116,7 +128,9 @@ function fakeDocker(
       record("removeContainer", id);
     },
     async renameContainer(id, name) {
+      if (opts.applyFailedRename && id === OLD_ID) oldName = `/${name}`;
       record("renameContainer", id, name);
+      if (id === OLD_ID) oldName = `/${name}`;
     },
     async connectNetwork(network, id, endpoint) {
       record("connectNetwork", network, id, endpoint);
@@ -468,6 +482,25 @@ describe("runUpdate", () => {
     ]);
   });
 
+  it("renames back when the rename went through despite an error", async () => {
+    const t = setup({
+      docker: fakeDocker({
+        applyFailedRename: true,
+        fail: { renameContainer: (_id, name) => (name === `${NAME}-vorher` ? "connection reset" : undefined) },
+      }),
+    });
+    const result = await runUpdate(t.deps, REQUEST);
+    expect(result.state).toBe("rolledBack");
+    expect(result.message).toContain("connection reset");
+    expect(mutating(t.calls)).toEqual([
+      `pullImage(${REPO}, 0.2.0)`,
+      `stopContainer(${OLD_ID}, 30)`,
+      `renameContainer(${OLD_ID}, ${NAME}-vorher)`,
+      `renameContainer(${OLD_ID}, ${NAME})`,
+      `startContainer(${OLD_ID})`,
+    ]);
+  });
+
   it("still rolls back when removing the new container fails", async () => {
     const t = setup({
       health: (url) => (url.includes(OLD_IP) ? "0.1.0" : "0.1.0"),
@@ -653,5 +686,120 @@ describe("findPortalContainer", () => {
       "Updater läuft nicht unter Docker Compose",
     );
     expect(fake.calls.some(([m]) => m === "listContainers")).toBe(false);
+  });
+});
+
+describe("recoverInterrupted", () => {
+  const SELF = {
+    ...oldContainer(),
+    Id: SELF_ID,
+    Name: "/agent-portal-updater-1",
+    Config: {
+      ...oldContainer().Config,
+      Labels: { "com.docker.compose.project": "agent-portal", "com.docker.compose.service": "updater" },
+    },
+  };
+  const PREVIOUS = { Id: OLD_ID, Names: [`/${NAME}-vorher`] };
+  const NEW = { Id: NEW_ID, Names: [`/${NAME}`] };
+
+  function status(state: UpdateStatus["state"]): UpdateStatus {
+    return { id: "req-1", state, from: "0.1.0", to: "0.2.0", message: "", at: 1 };
+  }
+
+  function recover(
+    fake: ReturnType<typeof fakeDocker>,
+    current: UpdateStatus | null,
+    health: (url: string) => string | null = (url) => (url.includes(NEW_IP) ? "0.2.0" : url.includes(OLD_IP) ? "0.1.0" : null),
+  ) {
+    const t = setup({ docker: fake, health, healthTimeoutMs: 6_000 });
+    return { t, result: recoverInterrupted(t.deps, SELF_ID, current) };
+  }
+
+  it("finishes an update whose new version is healthy", async () => {
+    const fake = fakeDocker({ self: SELF, list: [PREVIOUS, NEW], old: { ...oldContainer(), Name: `/${NAME}-vorher` } });
+    const { t, result } = recover(fake, status("checking"));
+    expect(await result).toMatchObject({
+      id: "req-1",
+      state: "done",
+      from: "0.1.0",
+      to: "0.2.0",
+      message: "Update auf 0.2.0 abgeschlossen (nach Unterbrechung)",
+    });
+    expect(mutating(t.calls)).toEqual([`removeContainer(${OLD_ID})`, `tagImage(${REPO}:0.2.0, ${REPO}, latest)`]);
+    expect(t.reports.at(-1)?.state).toBe("done");
+  });
+
+  it("restores the previous container when the new one does not answer", async () => {
+    const fake = fakeDocker({ self: SELF, list: [PREVIOUS, NEW], old: { ...oldContainer(), Name: `/${NAME}-vorher` } });
+    const { t, result } = recover(fake, status("checking"), () => null);
+    expect(await result).toMatchObject({
+      state: "rolledBack",
+      message: "Update unterbrochen, vorherige Version wiederhergestellt",
+    });
+    expect(mutating(t.calls)).toEqual([
+      `removeContainer(${NEW_ID})`,
+      `renameContainer(${OLD_ID}, ${NAME})`,
+      `startContainer(${OLD_ID})`,
+    ]);
+  });
+
+  it("does not wait for a new container that is not running", async () => {
+    const fake = fakeDocker({
+      self: SELF,
+      list: [PREVIOUS, NEW],
+      old: { ...oldContainer(), Name: `/${NAME}-vorher` },
+      newRunning: false,
+    });
+    const { t, result } = recover(fake, status("starting"));
+    expect((await result)?.state).toBe("rolledBack");
+    expect(t.healthUrls).toEqual([]);
+    expect(t.elapsed()).toBe(0);
+  });
+
+  it("restores the previous container when there is no other portal container", async () => {
+    const fake = fakeDocker({ self: SELF, list: [PREVIOUS], old: { ...oldContainer(), Name: `/${NAME}-vorher` } });
+    const { t, result } = recover(fake, status("failed"));
+    expect((await result)?.state).toBe("rolledBack");
+    expect(mutating(t.calls)).toEqual([`renameContainer(${OLD_ID}, ${NAME})`, `startContainer(${OLD_ID})`]);
+  });
+
+  it("reports failed when the restore itself fails", async () => {
+    const fake = fakeDocker({
+      self: SELF,
+      list: [PREVIOUS],
+      old: { ...oldContainer(), Name: `/${NAME}-vorher` },
+      fail: { renameContainer: "name in use" },
+    });
+    const { result } = recover(fake, status("starting"));
+    expect(await result).toMatchObject({
+      state: "failed",
+      message:
+        "Update unterbrochen, Wiederherstellung fehlgeschlagen: name in use — bitte `docker compose up -d` ausführen",
+    });
+  });
+
+  it("marks an update failed that was interrupted before anything was replaced", async () => {
+    const fake = fakeDocker({ self: SELF, list: [{ Id: OLD_ID, Names: [`/${NAME}`] }] });
+    const { t, result } = recover(fake, status("pulling"));
+    expect(await result).toMatchObject({ id: "req-1", state: "failed", message: "Update unterbrochen" });
+    expect(mutating(t.calls)).toEqual([]);
+  });
+
+  it("starts a portal container that was stopped before the interruption", async () => {
+    const fake = fakeDocker({ self: SELF, list: [{ Id: OLD_ID, Names: [`/${NAME}`] }], oldRunning: false });
+    const { t, result } = recover(fake, status("starting"));
+    expect((await result)?.state).toBe("failed");
+    expect(mutating(t.calls)).toEqual([`startContainer(${OLD_ID})`]);
+    expect(t.healthUrls).toEqual([]);
+  });
+
+  it("does nothing without a leftover container and without an open update", async () => {
+    for (const current of [null, status("done"), status("failed"), status("rolledBack")]) {
+      const fake = fakeDocker({ self: SELF, list: [{ Id: OLD_ID, Names: [`/${NAME}`] }] });
+      const { t, result } = recover(fake, current);
+      expect(await result).toBeNull();
+      expect(mutating(t.calls)).toEqual([]);
+      expect(t.reports).toEqual([]);
+    }
   });
 });

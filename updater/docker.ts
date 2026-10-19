@@ -28,6 +28,7 @@ export interface ContainerInfo {
     [key: string]: unknown;
   };
   HostConfig: Record<string, unknown>;
+  State?: { Running?: boolean; [key: string]: unknown };
   NetworkSettings: {
     Networks: Record<string, { IPAddress: string; Aliases: string[] | null; [key: string]: unknown }>;
   };

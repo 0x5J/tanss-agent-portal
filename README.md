@@ -81,6 +81,31 @@ Versionsnummer weiter.
 - `UPDATE_CHECK=0` schaltet die Abfrage bei GitHub ab (kein Banner).
 - `UPDATE_CHANNEL=staging` zeigt auch Pre-Releases an (siehe Staging).
 
+### Wenn das Portal nach einem Update nicht zurückkommt
+
+Der Updater stellt bei einem Fehler die alte Version wieder her, auch wenn er
+selbst mitten im Update gestoppt wurde (dann beim nächsten Start). Hilft das
+nicht, im Installationsordner nachsehen:
+
+```bash
+docker compose logs updater     # was der Updater getan hat
+cat data/update/status.json     # letzter Stand des Updates
+docker compose ps -a            # welche Container es gibt
+```
+
+Gibt es einen Container `<projekt>-portal-1-vorher`, ist das die alte Version.
+Zurückholen von Hand (Projektname z. B. `agent-portal`):
+
+```bash
+docker rm -f agent-portal-portal-1      # nur falls vorhanden
+docker rename agent-portal-portal-1-vorher agent-portal-portal-1
+docker start agent-portal-portal-1
+```
+
+Oder einfach `docker compose up -d`: Compose erstellt das Portal dann aus der
+`compose.yaml` neu; einen übrig gebliebenen `-vorher`-Container danach mit
+`docker rm` entfernen.
+
 ## Staging
 
 Neue Versionen lassen sich vor der Freigabe in einer zweiten Instanz testen:

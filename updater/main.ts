@@ -4,8 +4,8 @@ import { lchownSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import { STATUS_FILE, type UpdateStatus } from "../shared/update.ts";
 import { createDockerApi } from "./docker.ts";
-import { checkUpdateDir, createLoop, writeJsonAtomic } from "./loop.ts";
-import { findPortalContainer, runUpdate } from "./update.ts";
+import { checkUpdateDir, createLoop, readStatus, writeJsonAtomic } from "./loop.ts";
+import { findPortalContainer, recoverInterrupted, runUpdate } from "./update.ts";
 
 const TICK_MS = 5_000;
 const DIR_RECHECK_MS = 60_000;
@@ -74,6 +74,11 @@ function report(status: UpdateStatus): void {
   }
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** The update that runs right now; a stop waits for it. */
+let active: Promise<unknown> | null = null;
+
 const loop = createLoop({
   dir,
   version,
@@ -81,7 +86,7 @@ const loop = createLoop({
   run: (request) => {
     lastState = "";
     log(`Auftrag ${request.id}: Update auf ${request.version}`);
-    return runUpdate(
+    const run = runUpdate(
       {
         docker,
         repo,
@@ -89,10 +94,15 @@ const loop = createLoop({
         health,
         report,
         now: () => Date.now(),
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        sleep,
       },
       request,
     );
+    active = run;
+    void run.finally(() => {
+      active = null;
+    });
+    return run;
   },
 });
 
@@ -102,26 +112,47 @@ function tick(): void {
   });
 }
 
+/** Finishes or undoes an update this process was stopped in the middle of. */
+async function recover(): Promise<void> {
+  try {
+    // report() logs the outcome.
+    await recoverInterrupted({ docker, health, report, now: () => Date.now(), sleep }, selfId, readStatus(dir));
+  } catch (err) {
+    log(`Prüfung auf ein unterbrochenes Update fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 let timer: NodeJS.Timeout | null = null;
+let stopping = false;
 
 // Without a heartbeat the portal shows "Der Updater läuft nicht"; the process
 // stays up idle, so `restart: unless-stopped` does not loop.
-function start(): void {
+async function start(): Promise<void> {
   if (!adoptDir()) {
-    timer = setTimeout(start, DIR_RECHECK_MS);
+    timer = setTimeout(() => void start(), DIR_RECHECK_MS);
     return;
   }
   log(`Updater ${version} bereit, Portal-Image ${repo}`);
+  const recovery = recover();
+  active = recovery;
+  await recovery;
+  active = null;
+  if (stopping) return;
   tick();
   timer = setInterval(tick, TICK_MS);
 }
 
-start();
+void start();
 
-// An update has its own rollback semantics, so stopping mid-update is acceptable.
+// A running update gets to finish (compose.yaml grants a long stop grace
+// period); if it is killed anyway, the next start recovers.
 function stop(): void {
+  if (stopping) return;
+  stopping = true;
   if (timer) clearInterval(timer);
-  process.exit(0);
+  if (!active) process.exit(0);
+  log("Beenden angefordert, laufendes Update wird abgeschlossen …");
+  void active.finally(() => process.exit(0));
 }
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);

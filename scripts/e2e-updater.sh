@@ -250,6 +250,7 @@ services:
   updater:
     image: $UPDATER_IMAGE
     restart: unless-stopped
+    stop_grace_period: 2m
     environment:
       PORTAL_REPO: $PORTAL_REPO
     volumes:

@@ -148,6 +148,28 @@ function isRequest(v: unknown): v is UpdateRequest {
   return typeof r.id === "string" && typeof r.version === "string" && typeof r.requestedAt === "number";
 }
 
+const STATES: readonly string[] = ["pulling", "starting", "checking", "done", "failed", "rolledBack"];
+
+function isStatus(v: unknown): v is UpdateStatus {
+  if (v === null || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.id === "string" &&
+    typeof s.state === "string" &&
+    STATES.includes(s.state) &&
+    typeof s.from === "string" &&
+    typeof s.to === "string" &&
+    typeof s.message === "string" &&
+    typeof s.at === "number"
+  );
+}
+
+/** The last status the updater wrote, or null if there is none (or not a valid one). */
+export function readStatus(dir: string): UpdateStatus | null {
+  const value = readJson(path.join(dir, STATUS_FILE));
+  return isStatus(value) ? value : null;
+}
+
 function str(v: unknown, key: string): string {
   const value = v !== null && typeof v === "object" ? (v as Record<string, unknown>)[key] : undefined;
   return typeof value === "string" ? value : "";
