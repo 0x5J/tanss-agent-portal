@@ -1,6 +1,19 @@
 // The updater's file protocol with the portal: each tick publishes a heartbeat
 // and picks up at most one request.json, runs it and publishes the result.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import {
   HEARTBEAT_FILE,
@@ -18,18 +31,76 @@ export interface LoopOptions {
   now(): number;
 }
 
-/** Writes tmp + rename so the portal never reads a half-written file. */
+/** Requests and statuses are tiny; anything bigger is not ours. */
+const MAX_READ_BYTES = 4096;
+
+/**
+ * Writes tmp + rename so the portal never reads a half-written file. The
+ * folder is writable by the less trusted portal and this process is root, so
+ * the temp file has a random name, is created exclusively and never follows a
+ * symlink; rename replaces a symlink at the target instead of following it.
+ */
 export function writeJsonAtomic(dir: string, name: string, value: unknown): void {
   mkdirSync(dir, { recursive: true });
   const target = path.join(dir, name);
-  const tmp = `${target}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value), { mode: 0o644 });
-  renameSync(tmp, target);
+  const tmp = path.join(dir, `.${name}.${randomUUID()}.tmp`);
+  const fd = openSync(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+  try {
+    try {
+      const data = Buffer.from(JSON.stringify(value));
+      let written = 0;
+      while (written < data.length) written += writeSync(fd, data, written);
+      // The create mode is cut down by the umask; the portal user must read it.
+      fchmodSync(fd, 0o644);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, target);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // best effort
+    }
+    throw err;
+  }
+}
+
+/**
+ * Text of a small regular file. Anything else (a symlink via O_NOFOLLOW, a
+ * directory, a file bigger than MAX_READ_BYTES) yields no text; `missing`
+ * tells a plain absent file apart from those.
+ */
+function readSmallFile(file: string): { text: string } | { missing: boolean } {
+  let fd: number;
+  try {
+    fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (err) {
+    return { missing: (err as NodeJS.ErrnoException).code === "ENOENT" };
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_READ_BYTES) return { missing: false };
+    const buf = Buffer.alloc(stat.size);
+    let read = 0;
+    while (read < buf.length) {
+      const n = readSync(fd, buf, read, buf.length - read, read);
+      if (n === 0) break;
+      read += n;
+    }
+    return { text: buf.toString("utf8", 0, read) };
+  } catch {
+    return { missing: false };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function readJson(file: string): unknown {
+  const res = readSmallFile(file);
+  if (!("text" in res)) return null;
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
+    return JSON.parse(res.text);
   } catch {
     return null;
   }
@@ -64,20 +135,24 @@ export function createLoop(opts: LoopOptions): { tick(): Promise<void> } {
     busy = true;
     try {
       const file = path.join(opts.dir, REQUEST_FILE);
-      let text: string;
-      try {
-        text = readFileSync(file, "utf8");
-      } catch {
-        return; // no request pending
-      }
+      const read = readSmallFile(file);
+      if ("missing" in read && read.missing) return; // no request pending
+
       // Delete first: a crash mid-update must never replay the request.
-      rmSync(file, { force: true });
+      // (rmSync removes a symlink itself, it does not follow it.)
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        // e.g. a directory in its place: still report it, never run it
+      }
 
       let raw: unknown = null;
-      try {
-        raw = JSON.parse(text);
-      } catch {
-        // stays null: reported as unreadable below
+      if ("text" in read) {
+        try {
+          raw = JSON.parse(read.text);
+        } catch {
+          // stays null: reported as unreadable below
+        }
       }
       if (!isRequest(raw)) {
         write(STATUS_FILE, {

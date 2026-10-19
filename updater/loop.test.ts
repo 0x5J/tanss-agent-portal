@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -142,5 +151,105 @@ describe("createLoop", () => {
     await loop.tick();
     expect(existsSync(path.join(dir, "status.json.tmp"))).toBe(false);
     expect(existsSync(path.join(dir, "heartbeat.json.tmp"))).toBe(false);
+  });
+
+  describe("symlink hardening", () => {
+    let outside: string;
+    beforeEach(() => {
+      outside = mkdtempSync(path.join(tmpdir(), "updater-outside-"));
+    });
+    afterEach(() => {
+      rmSync(outside, { recursive: true, force: true });
+    });
+
+    const unreadable = { state: "failed", message: "Auftrag unlesbar" };
+
+    it("replaces a symlinked heartbeat.json instead of writing through it", async () => {
+      const victim = path.join(outside, "victim");
+      writeFileSync(victim, "keep");
+      symlinkSync(victim, path.join(dir, "heartbeat.json"));
+      const { loop } = setup();
+      await loop.tick();
+      expect(readFileSync(victim, "utf8")).toBe("keep");
+      expect(lstatSync(path.join(dir, "heartbeat.json")).isFile()).toBe(true);
+      expect(readJson("heartbeat.json")).toEqual({ at: 4242, version: "0.1.0" });
+    });
+
+    it("replaces a symlinked status.json instead of writing through it", async () => {
+      const victim = path.join(outside, "victim");
+      writeFileSync(victim, "keep");
+      symlinkSync(victim, path.join(dir, "status.json"));
+      writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+      const { loop, calls } = setup();
+      await loop.tick();
+      expect(calls).toHaveLength(1);
+      expect(readFileSync(victim, "utf8")).toBe("keep");
+      expect(lstatSync(path.join(dir, "status.json")).isFile()).toBe(true);
+      expect(readJson("status.json")).toEqual(done("r1"));
+    });
+
+    it("does not write through a planted temp-file symlink", async () => {
+      const victim = path.join(outside, "victim");
+      writeFileSync(victim, "keep");
+      symlinkSync(victim, path.join(dir, "heartbeat.json.tmp"));
+      const { loop } = setup();
+      await loop.tick();
+      expect(readFileSync(victim, "utf8")).toBe("keep");
+    });
+
+    it("treats a symlinked request.json as unreadable and removes only the link", async () => {
+      const target = path.join(outside, "request.json");
+      writeFileSync(target, JSON.stringify(request));
+      symlinkSync(target, path.join(dir, "request.json"));
+      const { loop, calls } = setup();
+      await loop.tick();
+      expect(calls).toHaveLength(0);
+      expect(() => lstatSync(path.join(dir, "request.json"))).toThrow();
+      expect(existsSync(target)).toBe(true);
+      expect(readJson("status.json")).toMatchObject(unreadable);
+    });
+
+    it("treats a request.json over 4096 bytes as unreadable", async () => {
+      writeFileSync(
+        path.join(dir, "request.json"),
+        JSON.stringify({ ...request, padding: "x".repeat(5000) }),
+      );
+      const { loop, calls } = setup();
+      await loop.tick();
+      expect(calls).toHaveLength(0);
+      expect(existsSync(path.join(dir, "request.json"))).toBe(false);
+      expect(readJson("status.json")).toMatchObject(unreadable);
+    });
+
+    it("ignores a symlinked status.json when guarding against duplicates", async () => {
+      const target = path.join(outside, "status.json");
+      writeFileSync(target, JSON.stringify(done("r1")));
+      symlinkSync(target, path.join(dir, "status.json"));
+      writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+      const { loop, calls } = setup();
+      await loop.tick();
+      expect(calls).toHaveLength(1);
+    });
+
+    it("writes files readable by the portal user even under a strict umask", async () => {
+      const old = process.umask(0o077);
+      try {
+        writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+        const { loop } = setup();
+        await loop.tick();
+      } finally {
+        process.umask(old);
+      }
+      for (const name of ["heartbeat.json", "status.json"]) {
+        expect(lstatSync(path.join(dir, name)).mode & 0o777).toBe(0o644);
+      }
+    });
+
+    it("leaves no temporary files behind", async () => {
+      writeFileSync(path.join(dir, "request.json"), JSON.stringify(request));
+      const { loop } = setup();
+      await loop.tick();
+      expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+    });
   });
 });
