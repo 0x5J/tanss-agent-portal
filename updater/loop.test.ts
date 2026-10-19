@@ -308,6 +308,12 @@ describe("checkUpdateDir", () => {
     expect(checkUpdateDir(dir, [me])).toContain("id_rsa");
   });
 
+  it("accepts what Finder and Explorer leave behind", () => {
+    writeFileSync(path.join(dir, "status.json"), "{}");
+    for (const name of [".DS_Store", "Thumbs.db", "desktop.ini"]) writeFileSync(path.join(dir, name), "");
+    expect(checkUpdateDir(dir, [me])).toBeNull();
+  });
+
   it("rejects a foreign subfolder", () => {
     mkdirSync(path.join(dir, "etc"));
     expect(checkUpdateDir(dir, [me])).toContain("etc");

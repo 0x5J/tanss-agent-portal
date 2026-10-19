@@ -62,11 +62,16 @@ function adoptDir(): boolean {
 const docker = createDockerApi();
 let lastState = "";
 
+/** Set once adoptDir() accepted the folder; nothing is written into it before. */
+let adopted = false;
+
 function report(status: UpdateStatus): void {
-  try {
-    writeJsonAtomic(dir, STATUS_FILE, status);
-  } catch (err) {
-    log(`status.json nicht schreibbar: ${err instanceof Error ? err.message : String(err)}`);
+  if (adopted) {
+    try {
+      writeJsonAtomic(dir, STATUS_FILE, status);
+    } catch (err) {
+      log(`status.json nicht schreibbar: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   if (status.state !== lastState) {
     lastState = status.state;
@@ -125,19 +130,26 @@ async function recover(): Promise<void> {
 let timer: NodeJS.Timeout | null = null;
 let stopping = false;
 
-// Without a heartbeat the portal shows "Der Updater läuft nicht"; the process
-// stays up idle, so `restart: unless-stopped` does not loop.
+// The recovery runs even when the folder is rejected: it only needs Docker,
+// and an interrupted update must not leave the portal stopped. Without a
+// heartbeat the portal shows "Der Updater läuft nicht"; the process stays up
+// idle, so `restart: unless-stopped` does not loop.
 async function start(): Promise<void> {
-  if (!adoptDir()) {
-    timer = setTimeout(() => void start(), DIR_RECHECK_MS);
-    return;
-  }
-  log(`Updater ${version} bereit, Portal-Image ${repo}`);
+  adopted = adoptDir();
   const recovery = recover();
   active = recovery;
   await recovery;
   active = null;
-  if (stopping) return;
+  if (!stopping) serve();
+}
+
+function serve(): void {
+  if (!adopted) adopted = adoptDir();
+  if (!adopted) {
+    timer = setTimeout(serve, DIR_RECHECK_MS);
+    return;
+  }
+  log(`Updater ${version} bereit, Portal-Image ${repo}`);
   tick();
   timer = setInterval(tick, TICK_MS);
 }

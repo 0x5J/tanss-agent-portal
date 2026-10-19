@@ -37,6 +37,8 @@ export interface LoopOptions {
 const PROTOCOL_FILES = new Set([REQUEST_FILE, STATUS_FILE, HEARTBEAT_FILE]);
 /** Temp files of the atomic writes on both sides, e.g. ".status.json.<uuid>.tmp". */
 const TEMP_FILE = /^\..+\.tmp$/;
+/** Finder and Explorer leave these behind when the folder is opened; not a wrong mount. */
+const OS_METADATA = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -45,7 +47,7 @@ function errorText(err: unknown): string {
 /**
  * Checks that the mounted folder is what compose.yaml mounts: a real folder
  * (no symlink) owned by root or the portal user, holding nothing but the
- * protocol files. Anything else means a wrong mount, and adopting it (chown)
+ * protocol files, their temp files and OS metadata. Anything else means a wrong mount, and adopting it (chown)
  * would hand a foreign folder to the portal user. Returns the problem in
  * German, or null when the folder looks right.
  */
@@ -62,7 +64,9 @@ export function checkUpdateDir(dir: string, owners: readonly number[] = [0, 1000
   } catch (err) {
     return `${dir} nicht lesbar: ${errorText(err)}`;
   }
-  const foreign = entries.filter((name) => !PROTOCOL_FILES.has(name) && !TEMP_FILE.test(name)).sort();
+  const foreign = entries
+    .filter((name) => !PROTOCOL_FILES.has(name) && !TEMP_FILE.test(name) && !OS_METADATA.has(name))
+    .sort();
   if (foreign.length > 0) return `unerwartete Einträge in ${dir}: ${foreign.join(", ")}`;
   return null;
 }
