@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TEMPLATE,
+  deriveCause,
   MAX_FINISHED_DELIVERIES,
   MAX_WEBHOOKS,
   matchesFilter,
@@ -8,10 +9,14 @@ import {
   parseDeliveries,
   parseLinks,
   parseWebhooks,
+  renderTemplate,
+  samplePayload,
+  templateError,
   toPublic,
   trimDeliveries,
   type Delivery,
 } from "./webhooks.ts";
+import type { ThreadEntry } from "./thread.ts";
 
 const delivery = (over: Partial<Delivery> = {}): Delivery => ({
   id: "d1",
@@ -126,5 +131,103 @@ describe("trimDeliveries", () => {
 describe("newId", () => {
   it("returns unique ids", () => {
     expect(newId()).not.toBe(newId());
+  });
+});
+
+const entry = (over: Partial<ThreadEntry> = {}): ThreadEntry => ({
+  key: "e",
+  kind: "Kommentar",
+  author: "",
+  from: "",
+  at: 0,
+  title: "",
+  text: "",
+  duration: 0,
+  ...over,
+});
+
+describe("cause, template and sample", () => {
+  const AT = 1792485720; // 2026-10-20 10:42 Berlin
+
+  it("takes the newest entry inside the window as the derived cause", () => {
+    const thread = [
+      entry({ kind: "Kommentar", author: "Anna", at: AT - 600 }),
+      entry({ kind: "Mail eingehend", author: "Max Mustermann", at: AT }),
+      entry({ kind: "Leistung", author: "Ben", at: AT + 999 }), // after the window
+    ];
+    expect(deriveCause(thread, AT - 900, AT + 60)).toEqual({
+      derived: true,
+      kind: "mail",
+      by: "Max Mustermann",
+      at: new Date(AT * 1000).toISOString(),
+      summary: "Mail von Max Mustermann um 10:42",
+    });
+  });
+
+  it("maps comments, notes and supports to their kinds", () => {
+    expect(deriveCause([entry({ kind: "Interne Notiz", author: "Anna", at: AT })], AT - 1, AT)).toMatchObject({
+      kind: "comment",
+      summary: "Kommentar von Anna um 10:42",
+    });
+    expect(deriveCause([entry({ kind: "Leistung", author: "Ben", at: AT })], AT - 1, AT)).toMatchObject({
+      kind: "support",
+      summary: "Zeitbuchung von Ben um 10:42",
+    });
+  });
+
+  it("uses an open start and a closed end for the window", () => {
+    const thread = [entry({ kind: "Kommentar", author: "Anna", at: AT })];
+    expect(deriveCause(thread, AT, AT + 10).kind).toBe("unknown");
+    expect(deriveCause(thread, AT - 10, AT).kind).toBe("comment");
+  });
+
+  it("ignores the description and reports unknown when nothing is in the window", () => {
+    const c = deriveCause([entry({ kind: "Beschreibung", at: AT })], AT - 10, AT + 10);
+    expect(c).toEqual({ derived: true, kind: "unknown", by: "", at: "", summary: "Kein Anlass im Verlauf gefunden" });
+  });
+
+  it("a change made in the portal wins and is not derived", () => {
+    const c = deriveCause([entry({ kind: "Kommentar", author: "Anna", at: AT })], AT - 10, AT + 10, {
+      at: AT + 5,
+      by: "Sören",
+    });
+    expect(c).toMatchObject({ derived: false, kind: "portal", by: "Sören", summary: "Im Portal von Sören geändert um 10:42" });
+    expect(c.at).toBe(new Date((AT + 5) * 1000).toISOString());
+  });
+
+  it("never puts mail or comment text into the cause", () => {
+    const c = deriveCause([entry({ kind: "Mail eingehend", author: "Max", at: AT, text: "GEHEIM", title: "Betreff" })], AT - 1, AT);
+    expect(JSON.stringify(c)).not.toMatch(/GEHEIM|Betreff/);
+  });
+
+  it("escapes values so the body stays valid JSON", () => {
+    const p = samplePayload({ id: "w", name: "n8n" });
+    p.ticket.title = 'Drucker "Büro"\nzweite Zeile';
+    const body = renderTemplate('{"t":"{{ticket.title}}","id":{{ticket.id}}}', p);
+    expect(JSON.parse(body)).toEqual({ t: 'Drucker "Büro"\nzweite Zeile', id: p.ticket.id });
+  });
+
+  it("accepts whitespace inside the braces and fills status names", () => {
+    const p = samplePayload({ id: "w", name: "n8n" });
+    expect(renderTemplate("{{ status.old }} -> {{status.new}} ({{webhook.name}})", p)).toBe("Neu -> Erledigt (n8n)");
+  });
+
+  it("{{json}} is the whole payload", () => {
+    const p = samplePayload({ id: "w", name: "n8n" });
+    expect(JSON.parse(renderTemplate("{{json}}", p))).toEqual(p);
+    expect(p.test).toBe(true);
+  });
+
+  it("reports unknown placeholders and invalid JSON", () => {
+    expect(templateError('{"a":"{{nope}}"}')).toBe("Unbekannter Platzhalter: {{nope}}");
+    expect(templateError('{"a":{{ticket.title}}}')).toBe("Die Vorlage ergibt kein gültiges JSON");
+    expect(templateError("{{json}}")).toBeNull();
+    expect(templateError(DEFAULT_TEMPLATE)).toBeNull();
+  });
+
+  it("throws for an unknown placeholder when rendering", () => {
+    expect(() => renderTemplate("{{nope}}", samplePayload({ id: "w", name: "n" }))).toThrow(
+      "Unbekannter Platzhalter: {{nope}}",
+    );
   });
 });

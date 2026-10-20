@@ -1,3 +1,6 @@
+import { berlinMinuteOfDay } from "./days.ts";
+import type { ThreadEntry } from "./thread.ts";
+
 /**
  * Webhooks that fire when a ticket changes status. A webhook is the target
  * (URL, payload template, optional secret); a link ties it to one ticket;
@@ -170,4 +173,165 @@ export function trimDeliveries(list: Delivery[]): Delivery[] {
       .slice(0, MAX_FINISHED_DELIVERIES),
   );
   return list.filter((d) => d.state === "pending" || keep.has(d));
+}
+
+export type CauseKind = "mail" | "comment" | "support" | "portal" | "unknown";
+
+/** Why the status changed. Never carries mail or comment text. */
+export type Cause = {
+  /** True when guessed from the thread, false when the portal made the change. */
+  derived: boolean;
+  kind: CauseKind;
+  by: string;
+  /** ISO time, or "" when unknown. */
+  at: string;
+  summary: string;
+};
+
+export type WebhookPayload = {
+  ticket: { id: number; title: string; url: string; customer: string };
+  status: { old: { id: number; name: string }; new: { id: number; name: string } };
+  cause: Cause;
+  changedAt: string;
+  technician: string;
+  webhook: { id: string; name: string };
+  test: boolean;
+};
+
+export const PLACEHOLDERS: string[] = [
+  "ticket.id",
+  "ticket.title",
+  "ticket.url",
+  "customer",
+  "status.old",
+  "status.new",
+  "cause.summary",
+  "cause.kind",
+  "cause.by",
+  "cause.at",
+  "changedAt",
+  "technician",
+  "webhook.name",
+  "json",
+];
+
+const isoOf = (unix: number): string => new Date(unix * 1000).toISOString();
+
+function clock(unix: number): string {
+  const m = berlinMinuteOfDay(unix);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+const THREAD_CAUSES: Partial<Record<ThreadEntry["kind"], { kind: CauseKind; label: string }>> = {
+  "Mail eingehend": { kind: "mail", label: "Mail von" },
+  "Mail ausgehend": { kind: "mail", label: "Mail von" },
+  Kommentar: { kind: "comment", label: "Kommentar von" },
+  "Interne Notiz": { kind: "comment", label: "Kommentar von" },
+  Leistung: { kind: "support", label: "Zeitbuchung von" },
+};
+
+/**
+ * Best guess at what moved the status: the newest mail, comment or support in
+ * (sinceUnix, untilUnix]. A change made in the portal is known, not guessed.
+ */
+export function deriveCause(
+  thread: ThreadEntry[],
+  sinceUnix: number,
+  untilUnix: number,
+  portal?: { at: number; by: string },
+): Cause {
+  if (portal) {
+    return {
+      derived: false,
+      kind: "portal",
+      by: portal.by,
+      at: isoOf(portal.at),
+      summary: `Im Portal von ${portal.by} geändert um ${clock(portal.at)}`,
+    };
+  }
+  let best: ThreadEntry | null = null;
+  for (const e of thread) {
+    if (!THREAD_CAUSES[e.kind] || e.at <= sinceUnix || e.at > untilUnix) continue;
+    if (!best || e.at >= best.at) best = e;
+  }
+  const mapped = best && THREAD_CAUSES[best.kind];
+  if (!best || !mapped) {
+    return { derived: true, kind: "unknown", by: "", at: "", summary: "Kein Anlass im Verlauf gefunden" };
+  }
+  return {
+    derived: true,
+    kind: mapped.kind,
+    by: best.author,
+    at: isoOf(best.at),
+    summary: `${mapped.label} ${best.author} um ${clock(best.at)}`,
+  };
+}
+
+function placeholderValue(name: string, p: WebhookPayload): string | number | undefined {
+  switch (name) {
+    case "ticket.id": return p.ticket.id;
+    case "ticket.title": return p.ticket.title;
+    case "ticket.url": return p.ticket.url;
+    case "customer": return p.ticket.customer;
+    case "status.old": return p.status.old.name;
+    case "status.new": return p.status.new.name;
+    case "cause.summary": return p.cause.summary;
+    case "cause.kind": return p.cause.kind;
+    case "cause.by": return p.cause.by;
+    case "cause.at": return p.cause.at;
+    case "changedAt": return p.changedAt;
+    case "technician": return p.technician;
+    case "webhook.name": return p.webhook.name;
+    case "json": return JSON.stringify(p);
+    default: return undefined;
+  }
+}
+
+/**
+ * Fills `{{name}}` placeholders. Strings are JSON-escaped without quotes (so
+ * they sit inside a JSON string), numbers stay numbers, `{{json}}` is the
+ * whole payload. Throws a German message for an unknown placeholder.
+ */
+export function renderTemplate(template: string, payload: WebhookPayload): string {
+  return template.replace(/\{\{\s*([\w.]*)\s*\}\}/g, (_all, name: string) => {
+    const value = placeholderValue(name, payload);
+    if (value === undefined) throw new Error(`Unbekannter Platzhalter: {{${name}}}`);
+    if (name === "json") return String(value);
+    return typeof value === "number" ? String(value) : JSON.stringify(value).slice(1, -1);
+  });
+}
+
+export function samplePayload(webhook: { id: string; name: string }): WebhookPayload {
+  const at = Math.floor(Date.now() / 1000);
+  return {
+    ticket: { id: 12345, title: "Beispielticket", url: "", customer: "Beispiel GmbH" },
+    status: { old: { id: 1, name: "Neu" }, new: { id: 2, name: "Erledigt" } },
+    cause: {
+      derived: true,
+      kind: "mail",
+      by: "Max Mustermann",
+      at: isoOf(at),
+      summary: `Mail von Max Mustermann um ${clock(at)}`,
+    },
+    changedAt: isoOf(at),
+    technician: "Erika Beispiel",
+    webhook: { id: webhook.id, name: webhook.name },
+    test: true,
+  };
+}
+
+/** Null when the template renders to valid JSON, else a German reason. */
+export function templateError(template: string): string | null {
+  let body: string;
+  try {
+    body = renderTemplate(template, samplePayload({ id: "sample", name: "Beispiel" }));
+  } catch (e) {
+    return e instanceof Error ? e.message : "Die Vorlage ist ungültig";
+  }
+  try {
+    JSON.parse(body);
+    return null;
+  } catch {
+    return "Die Vorlage ergibt kein gültiges JSON";
+  }
 }
