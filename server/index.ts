@@ -11,6 +11,7 @@ import { createSharedSession } from "./shared-session.ts";
 import { createLinearClient } from "./linear.ts";
 import { createReleaseSource } from "./releases.ts";
 import { createUpdateService } from "./updates.ts";
+import { createWebhookWatcher } from "./webhook-watcher.ts";
 import { VERSION } from "./version.ts";
 
 const config = loadConfig(process.env);
@@ -89,6 +90,8 @@ const updates = createUpdateService({
   source: createReleaseSource({ repo: "0x5J/tanss-agent-portal" }),
 });
 
+const webhooks = createWebhookWatcher({ tanss, store, shared, ticketUrl: config.tanssTicketUrl });
+
 const app = await buildApp({
   sessionSecret: config.sessionSecret,
   tanss,
@@ -102,6 +105,7 @@ const app = await buildApp({
   updates,
   onLogin: () => void poller.tick(),
   onAssignment: () => void measureSoon(),
+  webhooks,
   log: callLog,
   tanssTicketUrl: config.tanssTicketUrl,
   enableRateLimit: true,
@@ -119,6 +123,7 @@ if (config.serveStatic) {
 console.log(`Agent-Daten in ${config.dataDir}`);
 if (config.totp) console.log("2FA-Code wird aus TOTP_SECRET erzeugt");
 poller.start();
+webhooks.start();
 updates.start();
 console.log(`Update-Kanal: ${config.updateChannel}`);
 if (!config.updateCheck) console.log("UPDATE_CHECK=0: die Suche nach neuen Versionen ist aus");
