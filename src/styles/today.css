@@ -1,0 +1,56 @@
+/* The start page "Heute" (src/views/Today.tsx), after the redesign's screen "Heute". */
+.today-head { display: flex; flex-direction: column; gap: 6px; }
+.today-head h1 { font-size: 36px; line-height: 44px; }
+
+.briefing-card { background: var(--soft); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.briefing-label { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; color: var(--body); }
+.briefing-label svg { color: var(--ink); }
+.briefing-text { font-size: 18px; line-height: 28px; max-width: 68ch; text-wrap: pretty; white-space: pre-line; }
+.briefing-text.muted { font-size: 16px; line-height: 24px; }
+.briefing-id { font-size: inherit; font-weight: 500; }
+.briefing-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.briefing-actions .btn { padding: 10px 16px; }
+
+.today-columns { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+.today-main { flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.today-main-head { display: flex; flex-direction: column; gap: 4px; }
+.today-aside { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+
+.attention { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.attention-row {
+  display: flex; flex-direction: column; gap: 10px; padding: 18px 0;
+  border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left;
+  cursor: pointer; color: var(--ink); transition: opacity 150ms ease;
+}
+.attention-row:hover { opacity: 0.7; }
+.attention-meta { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+.attention-id { font-weight: 500; text-decoration: underline; text-underline-offset: 2px; font-variant-numeric: tabular-nums; }
+.attention-age { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--body); font-variant-numeric: tabular-nums; }
+.attention-age.danger { color: var(--red); font-weight: 500; }
+.attention-age.warn { color: var(--amber); font-weight: 500; }
+.attention-title { font-size: 16px; line-height: 24px; font-weight: 500; text-wrap: pretty; }
+.attention-note { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--amber); }
+.attention-more { align-self: flex-start; margin-top: 16px; }
+
+.today-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.due-list { display: flex; flex-direction: column; }
+.due-row {
+  display: flex; align-items: center; gap: 12px; background: transparent; border: 0; border-top: 1px solid var(--line);
+  padding: 12px 0; text-align: left; cursor: pointer; color: var(--ink);
+}
+.due-row:hover { opacity: 0.7; }
+.due-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.due-title { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.due-sub { font-size: 12px; color: var(--body); }
+.due-when { flex: none; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.due-when.danger { color: var(--red); }
+.due-when.warn { color: var(--amber); }
+
+.week-figure { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.week-value { font-size: 36px; line-height: 44px; font-weight: 700; font-feature-settings: "ss01"; font-variant-numeric: tabular-nums; }
+.week-bar { height: 8px; border-radius: 999px; background: var(--pressed); overflow: hidden; display: flex; }
+.week-bar .done { display: block; height: 100%; background: var(--ink); }
+.week-bar .now { display: block; height: 100%; background: var(--mute); }
+.week-legend { display: flex; gap: 16px; font-size: 13px; color: var(--body); flex-wrap: wrap; }
+.week-legend > span { display: flex; align-items: center; gap: 6px; }
+.week-legend .dot.flat { background: var(--mute); }

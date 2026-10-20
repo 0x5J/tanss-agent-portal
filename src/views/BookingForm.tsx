@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type Booking, type Meta } from "../api.ts";
 import { SNAP_MINUTES, clampStart, findClashes, formatClock, type Support } from "../../shared/timeline.ts";
 import { berlinMinuteOfDay } from "../../shared/days.ts";
@@ -6,6 +6,8 @@ import { formatHm, parseDuration } from "../../shared/duration.ts";
 import { MAX_EXAMPLES } from "../../shared/style.ts";
 import { findTargets, type Target } from "../targets.ts";
 import type { BookingDraft } from "../../shared/draft.ts";
+import { CheckBox, Icon, SPARK_SMALL } from "../ui/kit.tsx";
+import "../styles/times.css";
 
 /** The form is filled from a draft; the rules live in shared/draft.ts. */
 export type BookingInitial = BookingDraft;
@@ -22,6 +24,12 @@ type Props = {
   agentReady?: boolean;
   /** The day's bookings — for the overlap hint. */
   daySupports?: Support[];
+  /** A card floating over the day timeline: title row with time span and a close button. */
+  floating?: boolean;
+  /** Closes the floating card without booking. */
+  onCancel?: () => void;
+  /** Reports start and length while they are edited, so the timeline selection follows. */
+  onRange?: (startMinute: number | null, minutes: number | null) => void;
 };
 
 export function BookingForm(props: Props) {
@@ -58,6 +66,15 @@ export function BookingForm(props: Props) {
     startMinute !== null && minutes
       ? findClashes(startMinute, minutes, props.daySupports ?? [], initial.supportId ?? 0)
       : [];
+  const complete = startMinute !== null && Boolean(minutes) && Boolean(target) && Boolean(typeId) && Boolean(text.trim()) && notChargedOk;
+
+  // The callback is read through a ref, so a parent passing a fresh function
+  // each render does not re-fire the report.
+  const onRange = useRef(props.onRange);
+  onRange.current = props.onRange;
+  useEffect(() => {
+    onRange.current?.(startMinute, minutes);
+  }, [startMinute, minutes]);
 
   /** Take this text over as one of the three style examples. */
   async function keepAsExample() {
@@ -170,12 +187,12 @@ export function BookingForm(props: Props) {
     <div className="field full">
       <label>Zuweisung</label>
       {target ? (
-        <div className="row">
-          <span className="chip agent ellipsis" style={{ maxWidth: 360 }}>
+        <div className="row" style={{ minWidth: 0 }}>
+          <span className="chip agent ellipsis bf-target" title={target.label}>
             {target.label}
           </span>
           {!initial.ticketId ? (
-            <button className="btn ghost small" onClick={() => setTarget(null)}>
+            <button className="linkish small" onClick={() => setTarget(null)}>
               ändern
             </button>
           ) : null}
@@ -185,23 +202,22 @@ export function BookingForm(props: Props) {
           <input
             className="input"
             value={search}
+            autoFocus={props.floating && !initial.supportId}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Ticketnummer, Betreff oder Kunde suchen …"
           />
           {hits.length ? (
-            <div className="card" style={{ maxHeight: 180, overflow: "auto" }}>
+            <div className="bf-hits">
               {hits.map((hit) => (
                 <button
                   key={`${hit.kind}:${hit.id}`}
-                  className="palette-item"
+                  className="bf-hit"
                   onClick={() => {
                     setTarget(hit);
                     setSearch("");
                   }}
                 >
-                  <span className="badge" style={{ flex: "none" }}>
-                    {hit.kind === "ticket" ? "TICKET" : "KUNDE"}
-                  </span>
+                  <span className="bf-kind">{hit.kind === "ticket" ? "TICKET" : "KUNDE"}</span>
                   <span className="ellipsis">{hit.label}</span>
                 </button>
               ))}
@@ -212,8 +228,22 @@ export function BookingForm(props: Props) {
     </div>
   );
 
+  const dateLabel = initial.date.split("-").reverse().join(".");
+  const endMinute = startMinute !== null && minutes ? startMinute + minutes : null;
+
   return (
-    <div className={`booking-form${props.compact ? " compact" : ""}`}>
+    <div className={`booking-form${props.compact ? " compact" : ""}${props.floating ? " floating" : ""}`}>
+      {props.floating ? (
+        <div className="bf-head full">
+          <span className="bf-title">{initial.supportId ? "Leistung ändern" : "Leistung buchen"}</span>
+          <span className="muted mono">
+            {startMinute !== null ? formatClock(startMinute) : "--:--"}–{endMinute !== null ? formatClock(endMinute % (24 * 60)) : "--:--"}
+          </span>
+          <button className="bf-close" onClick={props.onCancel} title="Abbrechen (Esc)" aria-label="Abbrechen">
+            <Icon d="M18 6 6 18M6 6l12 12" size={14} stroke={2} />
+          </button>
+        </div>
+      ) : null}
       <div className="field">
         <label>Beginn</label>
         <input
@@ -226,17 +256,18 @@ export function BookingForm(props: Props) {
         />
       </div>
       <div className="field">
-        <label>Dauer</label>
+        <label className="bf-label-row">
+          <span>Dauer</span>
+          <span className="bf-label-hint">{minutes ? `= ${minutes} min` : "90 · 1:30 · 1,5h"}</span>
+        </label>
         <input
-          className="input mono"
+          className={`input mono${duration.trim() && minutes === null ? " bad" : ""}`}
           value={duration}
           onChange={(e) => setDuration(e.target.value)}
           onBlur={() => (minutes ? setDuration(formatHm(minutes)) : undefined)}
           placeholder="1:30"
-          style={{ borderColor: duration.trim() && minutes === null ? "var(--danger)" : undefined }}
           title="90, 1:30, 1,5h oder 45min"
         />
-        <span className="tiny muted">{minutes ? `${minutes} min` : "90 · 1:30 · 1,5h · 45min"}</span>
       </div>
       <div className="field">
         <label>Typ</label>
@@ -263,23 +294,18 @@ export function BookingForm(props: Props) {
           <label>Tätigkeitstext</label>
           {props.agentReady && target?.kind === "ticket" ? (
             <button
-              className="btn agent small"
+              className="btn small bf-draft"
               style={{ marginLeft: "auto" }}
               disabled={drafting}
               title="Tätigkeitstext aus dem Ticketverlauf entwerfen"
               onClick={() => void draftText()}
             >
-              {drafting ? (
-                <>
-                  <span className="dot xs agent pulse" /> entwirft …
-                </>
-              ) : (
-                "Aus dem Verlauf entwerfen"
-              )}
+              <Icon d={SPARK_SMALL} size={12} />
+              {drafting ? "entwirft …" : "Aus dem Verlauf entwerfen"}
             </button>
           ) : null}
         </div>
-        <textarea className="textarea" rows={props.compact ? 2 : 4} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea className="textarea" rows={props.compact || props.floating ? 2 : 4} value={text} onChange={(e) => setText(e.target.value)} />
         {initial.supportId && text.trim() ? (
           <button
             className="btn ghost small"
@@ -291,19 +317,24 @@ export function BookingForm(props: Props) {
           </button>
         ) : null}
       </div>
-      <div className="row full" style={{ gap: 12, flexWrap: "wrap" }}>
-        <label className="row small" style={{ gap: 6 }}>
-          <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} />
+      <div className="row full bf-options">
+        <button
+          type="button"
+          className="bf-check"
+          role="checkbox"
+          aria-checked={internal}
+          onClick={() => setInternal(!internal)}
+        >
+          <CheckBox on={internal} size={11} />
           intern
-        </label>
-        <label className="row small muted" style={{ gap: 6 }}>
+        </button>
+        <label className="row muted" style={{ gap: 8 }}>
           davon nicht berechnet
           <input
-            className="input mono"
+            className={`input mono bf-nc${notChargedOk ? "" : " bad"}`}
             value={notCharged}
             onChange={(e) => setNotCharged(e.target.value)}
             placeholder="0"
-            style={{ width: 70, borderColor: notChargedOk ? undefined : "var(--danger)" }}
           />
           min
         </label>
@@ -313,13 +344,13 @@ export function BookingForm(props: Props) {
             value={notChargedReason}
             onChange={(e) => setNotChargedReason(e.target.value)}
             placeholder="Grund (steht in TANSS)"
-            style={{ flex: 1, minWidth: 160 }}
+            style={{ flex: "1 1 160px", width: "auto", minWidth: 0 }}
           />
         ) : null}
       </div>
       {clashes.length ? (
-        <div className="row full tiny muted" style={{ gap: 6 }}>
-          <span className="dot xs warn" />
+        <div className="full bf-clash">
+          <span className="dot warn" />
           <span className="pretty">
             Überschneidet sich mit{" "}
             {clashes
@@ -330,19 +361,22 @@ export function BookingForm(props: Props) {
         </div>
       ) : null}
       {initial.lockText ? (
-        <div className="row full banner" style={{ borderRadius: 6, marginBottom: 0 }}>
-          <span className="dot sm warn" />
-          <span className="small">{initial.lockText} Änderungen sind nicht mehr möglich.</span>
+        <div className="full bf-lock">
+          <span className="dot warn" />
+          <span>{initial.lockText} Änderungen sind nicht mehr möglich.</span>
         </div>
       ) : null}
-      <div className="row full">
-        <span className="tiny muted">
-          {initial.date} ·{" "}
-          {initial.supportId ? `PUT /supports/${initial.supportId}` : "POST /supports"} · Zuweisung{" "}
-          {target ? (target.kind === "ticket" ? "Ticket (11)" : "Kunde (2)") : "fehlt"}
+      <div className="row full bf-foot">
+        <span
+          className="tiny muted"
+          title={`${initial.supportId ? `PUT /supports/${initial.supportId}` : "POST /supports"} · Zuweisung ${
+            target ? (target.kind === "ticket" ? "Ticket (11)" : "Kunde (2)") : "fehlt"
+          }`}
+        >
+          {dateLabel} · Zuweisung {target ? (target.kind === "ticket" ? "Ticket" : "Kunde") : "fehlt"}
         </span>
         <button
-          className="btn primary"
+          className={`btn primary bf-book${complete ? "" : " dim"}`}
           style={{ marginLeft: "auto" }}
           disabled={saving || Boolean(initial.lockText)}
           onClick={submit}

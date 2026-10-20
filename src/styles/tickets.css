@@ -1,0 +1,97 @@
+/* Tickets board, after the "Tickets" screen of docs/design/Agent-Portal-Redesign.dc.html. */
+.tk-page { min-height: 100%; }
+.tk-top { padding: 32px 32px 0; display: flex; flex-direction: column; gap: 24px; }
+
+/* Lists left, filters right; wraps on narrow screens. */
+.tk-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tk-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; position: relative; }
+.tk-saved { display: inline-flex; align-items: center; }
+.tk-dirty { color: var(--amber); margin-left: 6px; }
+.seg-item.active .tk-dirty { color: inherit; }
+.tk-x {
+  margin-left: 8px; width: 18px; height: 18px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1; opacity: 0; color: inherit; transition: opacity 150ms ease;
+}
+.seg-item:hover .tk-x, .seg-item.active .tk-x { opacity: 0.6; }
+.tk-x:hover { opacity: 1 !important; background: color-mix(in oklch, currentColor 15%, transparent); }
+.tk-add { color: var(--body); }
+.tk-menu { min-width: 260px; }
+.tk-menu .filter-option .checkbox, .tk-cols .checkbox { flex: none; }
+.tk-cols { right: 0; top: calc(100% + 6px); width: 240px; }
+.tk-cols .popover-item:disabled { cursor: default; opacity: 0.6; }
+.tk-cols .popover-item.muted { color: var(--body); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; margin-top: 4px; }
+.filter-chip svg { flex: none; }
+
+/* Agent: hint row, answers as soft cards underneath. */
+.tk-agent { display: flex; flex-direction: column; gap: 12px; }
+.tk-answer { background: var(--soft); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.tk-answer-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tk-answer-head .title { font-weight: 500; }
+.tk-answer-head .actions { margin-left: auto; display: flex; gap: 6px; }
+.tk-disc {
+  width: 28px; height: 28px; border-radius: 999px; background: var(--primary); color: var(--on-primary);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.tk-answer-body { font-size: 15px; line-height: 24px; white-space: pre-line; text-wrap: pretty; max-width: 80ch; }
+.tk-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.tk-facts .chip { font-weight: 400; background: var(--bg); }
+.tk-facts b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tk-groups { display: flex; flex-direction: column; gap: 8px; }
+.tk-group { background: var(--bg); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.tk-group .ids { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.tk-id { border: 0; cursor: pointer; }
+.tk-id:hover { background: var(--pressed); }
+.tk-link {
+  background: transparent; border: 0; padding: 0; font: inherit; font-weight: 500; color: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; font-variant-numeric: tabular-nums;
+}
+.tk-notes { display: flex; flex-direction: column; gap: 6px; }
+
+/* The table: 2px ink rule, 44px head, 56px rows. */
+.tk-grid { padding: 24px 32px 0; box-sizing: border-box; }
+.tk-head, .tk-row { display: grid; align-items: center; }
+.tk-head {
+  height: 44px; font-size: 13px; color: var(--body); border-top: 2px solid var(--ink); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 2; background: var(--bg);
+}
+.tk-head .sortable { cursor: pointer; }
+.tk-head .sortable:hover, .tk-head .sortable.on { color: var(--ink); }
+.tk-head .num { text-align: left; }
+.tk-row {
+  min-height: 56px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 14px;
+  transition: background 150ms ease;
+}
+.tk-row:hover { background: var(--soft); }
+.tk-row.selected { background: var(--soft); }
+.tk-row.focused { box-shadow: inset 3px 0 0 var(--ink); }
+.tk-row.overdue { background: color-mix(in oklch, var(--red) 6%, transparent); }
+.tk-row.overdue:hover { background: color-mix(in oklch, var(--red) 10%, var(--soft)); }
+.tk-row.overdue .updated { color: var(--red); font-weight: 500; }
+.tk-cell { min-width: 0; display: flex; align-items: center; }
+.tk-cell .num { text-align: left; padding-right: 0; font-size: 14px; }
+.tk-pad { padding-right: 12px; }
+.tk-check {
+  width: 44px; height: 100%; min-height: 44px; display: flex; align-items: center; background: transparent; border: 0; padding: 0;
+  cursor: pointer;
+}
+.tk-title { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 16px; }
+.tk-title .text { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tk-title .chip { flex: none; }
+.tk-status { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 12px; }
+.tk-empty { padding: 32px 0; color: var(--body); }
+.tk-keys { padding: 16px 0 96px; }
+
+/* Selection: a black pill at the bottom. */
+.tk-selbar {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 40;
+  display: flex; align-items: center; gap: 8px; background: var(--primary); color: var(--on-primary);
+  border-radius: 999px; padding: 8px 8px 8px 20px; box-shadow: var(--shadow); white-space: nowrap;
+}
+.tk-selbar .count { font-size: 14px; font-weight: 500; padding-right: 8px; font-variant-numeric: tabular-nums; }
+.tk-selbtn {
+  background: transparent; color: var(--on-primary); border: 1px solid currentColor; border-radius: 999px;
+  padding: 7px 14px; font-size: 14px; cursor: pointer; transition: opacity 150ms ease;
+}
+.tk-selbtn:hover { opacity: 0.8; }
+.tk-selbtn:disabled { opacity: 0.45; cursor: default; }
+.tk-selbtn.done { background: var(--on-primary); color: var(--primary); border-color: transparent; font-weight: 500; padding: 8px 14px; }

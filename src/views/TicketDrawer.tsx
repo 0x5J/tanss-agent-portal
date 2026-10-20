@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, type Meta, type TicketDetail } from "../api.ts";
-import type { ThreadEntry } from "../../shared/thread.ts";
 import type { TicketRow } from "../../shared/tickets.ts";
 import { formatHours, sumMinutes } from "../../shared/timeline.ts";
 import { dayAndClock, fullDate, minutesLabel, nowUnix, todayYmd } from "../format.ts";
 import { BookingForm } from "./BookingForm.tsx";
 import { DraftButton } from "./DraftButton.tsx";
 import { TicketAgentActions } from "./TicketAgentActions.tsx";
+import { Dot, Icon, Segmented, SPARK_SMALL } from "../ui/kit.tsx";
+import "../styles/drawer.css";
 
 type Props = {
   ticketId: number;
@@ -22,34 +23,17 @@ type Props = {
   onOpen: (id: number) => void;
 };
 
-const TABS = ["Thread", "Zeiten"] as const;
-
-function msgClass(entry: ThreadEntry): string {
-  switch (entry.kind) {
-    case "Interne Notiz":
-      return "note";
-    case "Mail eingehend":
-      return "inbound";
-    case "Beschreibung":
-      return "description";
-    case "Leistung":
-      return "support";
-    default:
-      return "";
-  }
-}
+const TABS = ["Verlauf", "Zeiten"] as const;
 
 export function TicketDrawer(props: Props) {
   const [detail, setDetail] = useState<TicketDetail | null>(null);
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Thread");
+  const [tab, setTab] = useState<(typeof TABS)[number]>("Verlauf");
   const [internal, setInternal] = useState(true);
   const [text, setText] = useState("");
   /** Heading of the posting; set by "Antwort entwerfen", editable, optional. */
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(0);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [summarising, setSummarising] = useState(false);
   /** Cleaned mail bodies by thread key; null while the original is shown. */
   const [cleaned, setCleaned] = useState<Record<string, string>>({});
   const [showOriginal, setShowOriginal] = useState<Record<string, boolean>>({});
@@ -58,7 +42,7 @@ export function TicketDrawer(props: Props) {
   const { ticketId, onError } = props;
 
   useEffect(() => {
-    setSummary(null);
+    setTab("Verlauf");
     setText("");
     setTitle("");
     setCleaned({});
@@ -94,18 +78,6 @@ export function TicketDrawer(props: Props) {
       onError(error);
     } finally {
       setReplying(null);
-    }
-  }
-
-  async function summarise() {
-    setSummarising(true);
-    try {
-      const result = await api.agent.summary(ticketId);
-      setSummary(result.text);
-    } catch (error) {
-      onError(error);
-    } finally {
-      setSummarising(false);
     }
   }
 
@@ -158,179 +130,185 @@ export function TicketDrawer(props: Props) {
   const total = detail ? sumMinutes(detail.supports) : 0;
   const states = props.meta?.states ?? [];
   const technicians = props.meta?.technicians ?? [];
+  const supports = detail ? [...detail.supports].sort((a, b) => a.date - b.date) : [];
 
   return (
     <>
       <div className="backdrop" onClick={props.onClose} />
-      <section className="drawer" role="dialog" aria-label={`Ticket #${ticketId}`}>
-        <header className="drawer-head">
-          <span className="badge">TANSS</span>
-          <span className="mono small muted">#{ticketId}</span>
-          <span className="title ellipsis">{ticket?.title ?? "lädt …"}</span>
-          {props.ticketUrl ? (
-            <a
-              className="btn muted"
-              style={{ marginLeft: "auto" }}
-              href={`${props.ticketUrl}${ticketId}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              In TANSS öffnen ↗
-            </a>
+      <section className="drawer td" role="dialog" aria-label={`Ticket #${ticketId}`}>
+        <header className="td-head">
+          <div className="td-meta">
+            <span>TANSS</span>
+            <span aria-hidden="true">·</span>
+            <span className="mono">#{ticketId}</span>
+            {ticket?.companyName ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="ellipsis">{ticket.companyName}</span>
+              </>
+            ) : null}
+            {ticket?.projectName ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="ellipsis">{ticket.projectName}</span>
+              </>
+            ) : null}
+            <span className="td-meta-actions">
+              {props.ticketUrl ? (
+                <a href={`${props.ticketUrl}${ticketId}`} target="_blank" rel="noreferrer">
+                  In TANSS öffnen ↗
+                </a>
+              ) : null}
+              <button className="td-close" onClick={props.onClose} title="Schließen (Esc)" aria-label="Schließen">
+                <Icon d="M18 6 6 18M6 6l12 12" size={16} />
+              </button>
+            </span>
+          </div>
+          <h2 className="td-title">{ticket?.title ?? "lädt …"}</h2>
+          {ticket ? (
+            <div className="td-pills">
+              <span className="td-pill">
+                <Dot tone={statusTone(ticket)} />
+                {ticket.statusName || "ohne Status"}
+              </span>
+              {ticket.typeName ? <span className="td-pill">{ticket.typeName}</span> : null}
+              {ticket.isProject ? <span className="td-pill">Projekt</span> : null}
+              {due ? <DuePill due={due} deadline={Boolean(ticket.deadlineDate)} now={now} /> : null}
+              {ticket.assigneeId ? null : <span className="td-pill outline">nicht zugewiesen</span>}
+            </div>
           ) : null}
-          <button className="btn muted" style={props.ticketUrl ? {} : { marginLeft: "auto" }} onClick={props.onClose}>
-            Esc
-          </button>
+          <div className="td-tabs" role="tablist">
+            {TABS.map((t) => (
+              <button key={t} role="tab" aria-selected={tab === t} className={`td-tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
+                {t}
+                {detail ? <span className="count">{t === "Zeiten" ? detail.supports.length : detail.thread.length}</span> : null}
+              </button>
+            ))}
+          </div>
         </header>
-        <div className="drawer-tabs">
-          {TABS.map((t) => (
-            <button key={t} className={`tab${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
-              {t}
-              {t === "Zeiten" && detail ? <span className="count">{detail.supports.length}</span> : null}
-            </button>
-          ))}
-        </div>
 
-        <div className="drawer-body">
-          <div className="drawer-main">
+        <div className="td-body">
+          <div className="td-main">
             {!detail ? <p className="muted">Ticket wird geladen …</p> : null}
 
-            {detail && tab === "Thread" ? (
+            {detail && tab === "Verlauf" ? (
               <>
-                {summary ? (
-                  <div className="agent-box">
-                    <div className="label">
-                      <span>Stand der Dinge · Entwurf vom Agenten</span>
-                      <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setSummary(null)}>
-                        ausblenden
-                      </button>
-                    </div>
-                    {summary}
-                  </div>
-                ) : (
-                  <div className="row" style={{ marginBottom: 10 }}>
-                    <button
-                      className="btn agent small"
-                      disabled={summarising || !props.agentReady}
-                      title={props.agentReady ? "Thread in fünf Zeilen zusammenfassen" : "KI nicht eingerichtet (Einstellungen)"}
-                      onClick={() => void summarise()}
-                    >
-                      {summarising ? (
-                        <>
-                          <span className="dot xs agent pulse" /> fasst zusammen …
-                        </>
-                      ) : (
-                        "Zusammenfassen"
-                      )}
-                    </button>
-                    <span className="tiny muted">{detail.thread.length} Einträge</span>
-                  </div>
-                )}
-                {detail.thread.map((entry) => (
-                  <div key={entry.key} className={`msg ${msgClass(entry)}`}>
-                    <div className="msg-head">
-                      <span className="author">{entry.author}</span>
-                      <span className="kind">
-                        {entry.kind}
-                        {entry.kind === "Leistung" ? ` · ${minutesLabel(entry.duration)}` : ""}
-                      </span>
-                      <span className="ts">{dayAndClock(entry.at)}</span>
-                    </div>
-                    {entry.title && entry.kind !== "Beschreibung" ? (
-                      <div className="subject">{entry.title}</div>
-                    ) : null}
-                    {cleaned[entry.key] && !showOriginal[entry.key] ? (
-                      <div className="agent-box" style={{ marginBottom: 6 }}>
-                        <div className="label">
-                          <span>Kurzfassung vom Agenten</span>
-                          <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setShowOriginal((o) => ({ ...o, [entry.key]: true }))}>
-                            Original
-                          </button>
-                        </div>
-                        {cleaned[entry.key]}
-                      </div>
-                    ) : (
-                      <p>{entry.text}</p>
-                    )}
-                    {entry.kind.startsWith("Mail") && props.agentReady ? (
-                      <div className="row" style={{ marginTop: 8, gap: 6 }}>
-                        {cleaned[entry.key] && showOriginal[entry.key] ? (
-                          <button className="btn ghost small" onClick={() => setShowOriginal((o) => ({ ...o, [entry.key]: false }))}>
-                            Kurzfassung
-                          </button>
-                        ) : !cleaned[entry.key] && entry.text.length > 200 ? (
-                          <button className="btn ghost small" disabled={cleaning === entry.key} onClick={() => void cleanMail(entry.key)} title="Zitate, Signatur und Disclaimer entfernen, Inhalt in wenigen Zeilen">
-                            {cleaning === entry.key ? "kürzt …" : "Kürzen"}
-                          </button>
-                        ) : null}
-                        {entry.kind === "Mail eingehend" ? (
-                          <button className="btn agent small" disabled={replying === entry.key} onClick={() => void replyTo(entry.key)} title="Antwort auf diese Mail als Kommentar-Entwurf">
-                            {replying === entry.key ? (
-                              <>
-                                <span className="dot xs agent pulse" /> entwirft …
-                              </>
-                            ) : (
-                              "Antwort entwerfen"
-                            )}
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
+                {ticket ? (
+                  <TicketAgentActions
+                    ticketId={ticketId}
+                    ready={props.agentReady}
+                    entries={detail.thread.length}
+                    states={states}
+                    boardRows={props.boardRows}
+                    onSetStatus={(statusId, name) => void patch({ statusId }, `Status → ${name}`)}
+                    onSetCompany={(companyId, name) => void patch({ companyId }, `Kunde → ${name}`)}
+                    onOpen={props.onOpen}
+                    onError={onError}
+                  />
+                ) : null}
 
-                <div className="reply" id="drawer-reply">
-                  <div className="reply-tabs">
-                    <button className={`tab${internal ? " active" : ""}`} onClick={() => setInternal(true)}>
-                      Interne Notiz
-                    </button>
-                    <button className={`tab${!internal ? " active" : ""}`} onClick={() => setInternal(false)}>
-                      Kommentar
-                    </button>
-                  </div>
-                  <div className="reply-body">
-                    {title ? (
-                      <div className="row" style={{ marginBottom: 6, gap: 6 }}>
-                        <span className="badge agent">Titel</span>
-                        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} style={{ flex: 1 }} />
-                        <button className="btn ghost small" onClick={() => setTitle("")} title="Ohne Titel speichern">
-                          ×
-                        </button>
+                <div className="td-thread">
+                  {detail.thread.map((entry) => (
+                    <article key={entry.key} className="td-msg">
+                      <div className="td-msg-head">
+                        <span className="author">{entry.author}</span>
+                        <span className={`td-kind${entry.kind === "Interne Notiz" ? " dark" : ""}`}>
+                          {entry.kind}
+                          {entry.kind === "Leistung" ? ` · ${minutesLabel(entry.duration)}` : ""}
+                        </span>
+                        <span className="ts">{dayAndClock(entry.at)}</span>
                       </div>
-                    ) : null}
-                    <textarea
-                      className="textarea"
-                      rows={3}
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      placeholder={
-                        internal
-                          ? "Interne Notiz – nur für Mitarbeiter sichtbar"
-                          : "Kommentar – wird im Ticket gespeichert"
-                      }
-                    />
-                    <div className="row">
-                      <DraftButton
-                        ticketIds={[ticketId]}
-                        internal={internal}
-                        ready={props.agentReady}
-                        hasText={Boolean(text.trim())}
-                        onDraft={setText}
-                        onError={onError}
-                      />
-                      <span className="tiny muted">
-                        Geht als {internal ? "interner" : "öffentlicher"} Kommentar an
-                        POST /tickets/{ticketId}/comments
-                      </span>
-                      <button
-                        className="btn primary"
-                        style={{ marginLeft: "auto" }}
-                        disabled={saving || !text.trim()}
-                        onClick={saveComment}
-                      >
-                        {saving ? "Speichert …" : internal ? "Notiz speichern" : "Kommentar speichern"}
+                      {entry.title && entry.kind !== "Beschreibung" ? <div className="td-subject">{entry.title}</div> : null}
+                      {cleaned[entry.key] && !showOriginal[entry.key] ? (
+                        <div className="td-short">
+                          <div className="td-short-label">
+                            <Icon d={SPARK_SMALL} size={12} />
+                            <span>Kurzfassung vom Agenten</span>
+                            <button className="linkish muted small" onClick={() => setShowOriginal((o) => ({ ...o, [entry.key]: true }))}>
+                              Original zeigen
+                            </button>
+                          </div>
+                          {cleaned[entry.key]}
+                        </div>
+                      ) : (
+                        <p className="td-text">{entry.text}</p>
+                      )}
+                      {entry.kind.startsWith("Mail") && props.agentReady ? (
+                        <div className="td-msg-actions">
+                          {cleaned[entry.key] && showOriginal[entry.key] ? (
+                            <button className="btn small" onClick={() => setShowOriginal((o) => ({ ...o, [entry.key]: false }))}>
+                              Kurzfassung
+                            </button>
+                          ) : !cleaned[entry.key] && entry.text.length > 200 ? (
+                            <button
+                              className="btn small"
+                              disabled={cleaning === entry.key}
+                              onClick={() => void cleanMail(entry.key)}
+                              title="Zitate, Signatur und Disclaimer entfernen, Inhalt in wenigen Zeilen"
+                            >
+                              {cleaning === entry.key ? "kürzt …" : "Kürzen"}
+                            </button>
+                          ) : null}
+                          {entry.kind === "Mail eingehend" ? (
+                            <button
+                              className="btn small"
+                              disabled={replying === entry.key}
+                              onClick={() => void replyTo(entry.key)}
+                              title="Antwort auf diese Mail als Kommentar-Entwurf"
+                            >
+                              <Icon d={SPARK_SMALL} size={12} />
+                              {replying === entry.key ? "entwirft …" : "Antwort entwerfen"}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+
+                <div className="td-reply" id="drawer-reply">
+                  <Segmented
+                    small
+                    onSoft
+                    label="Art des Eintrags"
+                    options={[
+                      { id: "note", label: "Interne Notiz" },
+                      { id: "comment", label: "Kommentar" },
+                    ]}
+                    value={internal ? "note" : "comment"}
+                    onChange={(id) => setInternal(id === "note")}
+                  />
+                  {title ? (
+                    <div className="td-reply-title">
+                      <span className="td-pill dark">Titel</span>
+                      <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Titel des Eintrags" />
+                      <button className="td-insight-close" onClick={() => setTitle("")} title="Ohne Titel speichern" aria-label="Titel entfernen">
+                        ×
                       </button>
                     </div>
+                  ) : null}
+                  <textarea
+                    className="td-reply-text"
+                    rows={5}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    placeholder={internal ? "Interne Notiz – nur für Mitarbeiter sichtbar" : "Kommentar – wird im Ticket gespeichert"}
+                  />
+                  <div className="td-reply-foot">
+                    <DraftButton
+                      ticketIds={[ticketId]}
+                      internal={internal}
+                      ready={props.agentReady}
+                      hasText={Boolean(text.trim())}
+                      onDraft={setText}
+                      onError={onError}
+                    />
+                    <span className="tiny muted pretty">
+                      Geht als {internal ? "interner" : "öffentlicher"} Kommentar an POST /tickets/{ticketId}/comments
+                    </span>
+                    <button className="btn primary lg" style={{ marginLeft: "auto" }} disabled={saving || !text.trim()} onClick={saveComment}>
+                      {saving ? "Speichert …" : internal ? "Notiz speichern" : "Kommentar speichern"}
+                    </button>
                   </div>
                 </div>
               </>
@@ -338,25 +316,25 @@ export function TicketDrawer(props: Props) {
 
             {detail && tab === "Zeiten" ? (
               <>
-                <h3 style={{ fontSize: 15, marginBottom: 8 }}>
-                  Zeiten des Tickets <span className="mono muted small">{formatHours(total)}</span>
-                </h3>
-                <div className="times-table">
-                  {detail.supports.length === 0 ? (
-                    <div className="line muted">Noch keine Leistung gebucht.</div>
-                  ) : null}
-                  {[...detail.supports]
-                    .sort((a, b) => a.date - b.date)
-                    .map((s) => (
-                      <div key={s.id} className="line">
-                        <span className="mono muted">{fullDate(s.date).slice(0, 6)}</span>
-                        <span className="mono">{minutesLabel(s.duration)}</span>
-                        <span className="muted ellipsis">
-                          {s.typeName ? `${s.typeName} · ` : ""}
-                          {s.text.split("\n")[0]}
-                        </span>
-                      </div>
-                    ))}
+                <div className="table td-times">
+                  {supports.length === 0 ? <div className="td-times-row muted">Noch keine Leistung gebucht.</div> : null}
+                  {supports.map((s) => (
+                    <div key={s.id} className="td-times-row">
+                      <span className="muted">{fullDate(s.date).slice(0, 6)}</span>
+                      <span className="strong">{minutesLabel(s.duration)}</span>
+                      <span className="ellipsis" title={s.text}>
+                        {s.typeName ? <span className="muted">{s.typeName} · </span> : null}
+                        {s.text.split("\n")[0]}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="td-times-sum">
+                    <span>Summe</span>
+                    <span>{formatHours(total)}</span>
+                  </div>
+                </div>
+                <div className="td-book">
+                  <h3 className="h2" style={{ fontSize: 18, lineHeight: "24px" }}>Leistung buchen</h3>
                   <BookingForm
                     meta={props.meta}
                     agentReady={props.agentReady}
@@ -372,15 +350,14 @@ export function TicketDrawer(props: Props) {
                 </div>
               </>
             ) : null}
-            <div style={{ height: 40 }} />
           </div>
 
-          <div className="drawer-side">
-            <div className="prop">
+          <aside className="td-side" aria-label="Eigenschaften">
+            <div className="td-prop">
               <span className="k">Status</span>
               {states.length && ticket ? (
                 <select
-                  className="select"
+                  className="td-select"
                   value={ticket.statusId}
                   onChange={(e) => void patch({ statusId: Number(e.target.value) }, "Status geändert")}
                 >
@@ -397,15 +374,13 @@ export function TicketDrawer(props: Props) {
                 <span className="v">{ticket?.statusName ?? "—"}</span>
               )}
             </div>
-            <div className="prop">
+            <div className="td-prop">
               <span className="k">Zuständig</span>
               {ticket && technicians.length ? (
                 <select
-                  className="select"
+                  className="td-select"
                   value={ticket.assigneeId}
-                  onChange={(e) =>
-                    void patch({ assignedToEmployeeId: Number(e.target.value) }, "Zuweisung geändert")
-                  }
+                  onChange={(e) => void patch({ assignedToEmployeeId: Number(e.target.value) }, "Zuweisung geändert")}
                 >
                   <option value={0}>— niemand —</option>
                   {!technicians.some((t) => t.id === ticket.assigneeId) && ticket.assigneeId ? (
@@ -420,32 +395,16 @@ export function TicketDrawer(props: Props) {
               ) : (
                 <span className="v">{ticket?.assigneeName || "—"}</span>
               )}
-            </div>
-            {ticket && props.meta && ticket.assigneeId !== props.meta.employeeId ? (
-              <div className="prop" style={{ borderBottom: 0, paddingTop: 4 }}>
-                <span className="k" />
+              {ticket && props.meta && ticket.assigneeId !== props.meta.employeeId ? (
                 <button
-                  className="btn agent"
-                  onClick={() =>
-                    void patch({ assignedToEmployeeId: props.meta!.employeeId }, "Mir zugewiesen")
-                  }
+                  className="btn small"
+                  style={{ alignSelf: "flex-start", marginTop: 6 }}
+                  onClick={() => void patch({ assignedToEmployeeId: props.meta!.employeeId }, "Mir zugewiesen")}
                 >
                   Mir zuweisen
                 </button>
-              </div>
-            ) : null}
-            {ticket ? (
-              <TicketAgentActions
-                ticketId={ticketId}
-                ready={props.agentReady}
-                states={states}
-                boardRows={props.boardRows}
-                onSetStatus={(statusId, name) => void patch({ statusId }, `Status → ${name}`)}
-                onSetCompany={(companyId, name) => void patch({ companyId }, `Kunde → ${name}`)}
-                onOpen={props.onOpen}
-                onError={onError}
-              />
-            ) : null}
+              ) : null}
+            </div>
             <Prop k="Kunde" v={ticket?.companyName || "—"} />
             {ticket?.projectName ? <Prop k="Projekt" v={ticket.projectName} /> : null}
             <Prop k="Typ" v={ticket?.typeName || "—"} />
@@ -459,24 +418,38 @@ export function TicketDrawer(props: Props) {
             <Prop k="Erstellt" v={ticket ? dayAndClock(ticket.creationDate) : "—"} mono />
             <Prop k="Geändert" v={ticket ? dayAndClock(ticket.modified) : "—"} mono />
             <Prop k="Zeitsumme" v={formatHours(total)} mono />
-            {ticket?.estimatedMinutes ? (
-              <Prop k="Geschätzt" v={minutesLabel(ticket.estimatedMinutes)} mono />
-            ) : null}
-          </div>
+            {ticket?.estimatedMinutes ? <Prop k="Geschätzt" v={minutesLabel(ticket.estimatedMinutes)} mono /> : null}
+          </aside>
         </div>
       </section>
     </>
   );
 }
 
+/** Waiting is the customer's turn (amber); "Neu …" has not been touched yet (grey). */
+function statusTone(ticket: TicketRow): "warn" | "flat" | "ink" {
+  if (ticket.waiting) return "warn";
+  if (/^neu\b/i.test(ticket.statusName)) return "flat";
+  return "ink";
+}
+
+/** The due date as the prototype's SLA pill: outlined red when overdue, amber within a day. */
+function DuePill(props: { due: number; deadline: boolean; now: number }) {
+  const left = props.due - props.now;
+  const tone = left < 0 ? "danger" : left < 86400 ? "warn" : "";
+  const label = props.deadline ? "Deadline" : "Fällig";
+  return (
+    <span className={`td-pill${tone ? ` outline ${tone}` : ""}`} title={dayAndClock(props.due)}>
+      {left < 0 ? `${label} seit ${dayAndClock(props.due)}` : `${label} ${dayAndClock(props.due)}`}
+    </span>
+  );
+}
+
 function Prop(props: { k: string; v: string; mono?: boolean; tone?: "danger" }) {
   return (
-    <div className="prop">
+    <div className="td-prop">
       <span className="k">{props.k}</span>
-      <span
-        className={`v ellipsis${props.mono ? " mono" : ""}`}
-        style={props.tone === "danger" ? { color: "var(--danger)" } : undefined}
-      >
+      <span className={`v ellipsis${props.mono ? " mono" : ""}`} style={props.tone === "danger" ? { color: "var(--red)" } : undefined}>
         {props.v}
       </span>
     </div>

@@ -35,6 +35,7 @@ export function Palette(props: Props) {
 
   const q = query.trim().toLowerCase();
   const jump: Item[] = [
+    { group: "Springen", label: "Heute", hint: "G H", run: () => props.onView("today") },
     { group: "Springen", label: "Dashboard", hint: "G D", run: () => props.onView("dashboard") },
     { group: "Springen", label: "Tickets", hint: "G T", run: () => props.onView("tickets") },
     { group: "Springen", label: "Zeiten", hint: "G Z", run: () => props.onView("times") },

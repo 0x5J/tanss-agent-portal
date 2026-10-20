@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import type { UpdateIndicator } from "../shared/update.ts";
+import { SPARK } from "./ui/kit.tsx";
 
-export type View = "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
+export type View = "today" | "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
 
 type NavItem = { id: View; label: string; key: string; icon: string };
 
@@ -10,6 +11,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
   {
     label: "Arbeit",
     items: [
+      { id: "today", label: "Heute", key: "G H", icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 16l2 2 4-4" },
       { id: "tickets", label: "Tickets", key: "G T", icon: "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" },
       { id: "times", label: "Zeiten", key: "G Z", icon: "M12 6v6l4 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0" },
       { id: "import", label: "Import", key: "G I", icon: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" },
@@ -35,8 +37,6 @@ const GROUP: Record<View, string> = Object.fromEntries(
   NAV.flatMap((group) => group.items.map((item) => [item.id, group.label])),
 ) as Record<View, string>;
 
-/** The agent's mark: a four-pointed sparkle. */
-export const SPARK = "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 3v4M21 5h-4";
 const SUN = "M12 3v1M12 20v1M4.2 4.2l.7.7M19.1 19.1l.7.7M3 12h1M20 12h1M4.2 19.8l.7-.7M19.1 4.9l.7-.7M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0";
 const MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
 const LOGOUT = "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9";
@@ -65,6 +65,7 @@ const UPDATE_DOT: Record<UpdateIndicator["tone"], string> = {
 };
 
 const TITLES: Record<View, string> = {
+  today: "Heute",
   dashboard: "Dashboard",
   tickets: "Tickets",
   times: "Zeiten",
@@ -88,7 +89,8 @@ type Props = {
   /** The signed-in technician; empty until the TANSS metadata is in. */
   userName: string;
   employeeId: number;
-  subtitle: string;
+  /** Small counters beside nav items (e.g. open tickets); zero or missing hides them. */
+  counts?: Partial<Record<View, number>>;
   query: string;
   onQuery: (query: string) => void;
   showSearch: boolean;
@@ -126,6 +128,7 @@ export function Shell(props: Props) {
                     <Icon d={item.icon} />
                   </span>
                   <span className="label">{item.label}</span>
+                  {props.counts?.[item.id] ? <span className="count">{props.counts[item.id]}</span> : null}
                 </button>
               ))}
             </div>
@@ -184,7 +187,6 @@ export function Shell(props: Props) {
             <span className="sep">/</span>
             <h1 className="title">{TITLES[props.view]}</h1>
           </div>
-          <span className="subtitle ellipsis">{props.subtitle}</span>
           <div className="topbar-right">
             {props.showSearch ? (
               <div className="search" onClick={() => document.getElementById("board-search")?.focus()}>

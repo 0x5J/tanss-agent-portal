@@ -6,6 +6,29 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Startseite „Heute“ (`G H`): Begrüßung, Agent-Briefing über die eigenen
+  Tickets, die eigenen offenen Tickets nach Dringlichkeit, „Fällig heute“ und
+  die gebuchten Stunden der Woche.
+- Zeiten: Ziehen im Zeitstrahl wählt eine Spanne und öffnet das
+  Buchungsformular als Karte daneben. Daneben „Vom Agenten vorgeschlagen“ mit
+  den Vorschlägen des Tagesassistenten als Karten.
+- Tickets: Spaltenauswahl „Spalten“; die Auswahl bleibt im Browser.
+- Auswertung: „CSV exportieren“ für die angezeigten Buchungen.
+
+### Geändert
+
+- Alle Ansichten folgen jetzt dem Aufbau des Redesign-Entwurfs, nicht nur
+  seinen Farben: große Seitenüberschrift mit Aktionen, Listen und Modi als
+  Pillen-Leisten, Agent-Hinweise mit schwarzem Funken, Tabellen mit kräftiger
+  Kopflinie, Kacheln, Ring- und Balkendiagramme in Graustufen.
+- Ticketansicht: Kopf mit Status- und Fälligkeits-Pillen, Reiter mit
+  Unterstrich, Karte „Einschätzung des Agenten“, Eigenschaften rechts.
+- Einstellungen in Reitern: Allgemein, Verbindungen, Lokale KI, Agent,
+  Texte & Bausteine. Verbindungen lassen sich testen.
+- Tagesimport als Ablauf in drei Schritten.
+
 ## [0.4.0] – 2026-10-20
 
 ### Entfernt

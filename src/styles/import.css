@@ -1,0 +1,71 @@
+/* Tagesimport: a three-step stepper on an ink rule. */
+.stepper { display: flex; border-top: 2px solid var(--ink); }
+.step {
+  flex: 1; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left;
+  background: transparent; border: 0; border-top: 4px solid transparent; margin-top: -3px;
+  padding: 14px 16px 0 0; cursor: pointer; color: var(--ink); opacity: 0.55;
+}
+.step.reached { opacity: 1; }
+.step.active { border-top-color: var(--ink); }
+.step:disabled { cursor: default; }
+.step .n { font-size: 12px; color: var(--body); }
+.step .label { font-size: 16px; font-weight: 500; }
+
+/* Step 1: one card per workflow state, each with its switch. */
+.source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.source-card {
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start; text-align: left; background: var(--soft);
+  border: 0; border-radius: 16px; padding: 24px; cursor: pointer; color: var(--ink); transition: background 150ms ease;
+}
+.source-card:hover { background: var(--soft2); }
+.source-card .top { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 12px; }
+.source-card .label { font-size: 16px; font-weight: 500; }
+.source-card .meta { color: var(--body); font-size: 13px; }
+
+.limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+.limits .field > span:first-child { font-size: 13px; font-weight: 500; }
+.limits .input, .limits .select { background: var(--bg); border-bottom: 2px solid var(--line); }
+.limits .input:focus, .limits .select:focus { border-bottom-color: var(--ink); }
+.day-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.day-pick .input { width: 170px; background: var(--soft); }
+
+/* Step 2: the review table. */
+.import-grid { grid-template-columns: 40px 70px 110px minmax(240px, 1fr) 200px 120px 80px; min-width: 900px; }
+.import-grid > span { min-width: 0; }
+.import-grid .box { display: flex; align-items: center; }
+.import-grid .box button { background: transparent; border: 0; padding: 0; cursor: pointer; display: flex; }
+.import-grid .box button:disabled { cursor: default; opacity: 0.4; }
+.import-row-title { display: flex; flex-direction: column; gap: 2px; padding-right: 16px; min-width: 0; }
+.import-row-title .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-row-title .p { font-size: 12px; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow.dropped > span:not(.box) { opacity: 0.45; }
+.target-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
+.target-cell.missing { color: var(--amber); font-weight: 500; }
+
+.import-editor {
+  background: var(--soft); border-radius: 16px; padding: 20px; margin: 8px 0 12px; display: flex; flex-direction: column; gap: 14px;
+}
+.import-editor .fields { display: flex; align-items: flex-end; gap: 12px 16px; flex-wrap: wrap; }
+.import-editor .field > span:first-child { font-size: 13px; font-weight: 500; }
+.import-editor .input, .import-editor .select, .import-editor .textarea { background: var(--bg); border-bottom: 2px solid var(--line); }
+.import-editor .input:focus, .import-editor .select:focus, .import-editor .textarea:focus { border-bottom-color: var(--ink); }
+.import-editor .input.invalid { border-bottom-color: var(--red); }
+.import-editor .target { position: relative; }
+.import-editor .target-pill {
+  display: inline-flex; align-items: center; gap: 8px; background: var(--primary); color: var(--on-primary);
+  border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; max-width: 360px;
+}
+.import-editor .target-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-editor .flags { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--body); }
+.import-editor .flags .flag { display: flex; align-items: flex-start; gap: 8px; }
+.import-editor .flags .flag .dot { margin-top: 6px; }
+.import-editor .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 14px; }
+
+.wizard-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 24px; }
+.wizard-foot .note { font-size: 13px; color: var(--body); }
+
+/* Step 3: what will be booked. */
+.book-grid { grid-template-columns: 70px 110px minmax(220px, 1fr) 220px 80px; min-width: 760px; }
+
+/* Log */
+.log-grid { grid-template-columns: 110px 90px minmax(280px, 1fr) 90px 80px 32px; }

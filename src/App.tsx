@@ -3,6 +3,7 @@ import { api, ApiError, type AgentSettings, type AuthConfig, type Meta } from ".
 import { Login } from "./Login.tsx";
 import { Shell, type View } from "./Shell.tsx";
 import { DashboardView } from "./views/Dashboard.tsx";
+import { TodayView } from "./views/Today.tsx";
 import { TicketsView } from "./views/Tickets.tsx";
 import { TicketDrawer } from "./views/TicketDrawer.tsx";
 import { TimesView } from "./views/Times.tsx";
@@ -16,6 +17,7 @@ import { updateIndicator } from "../shared/update.ts";
 import { Palette } from "./Palette.tsx";
 import { AgentSidebar } from "./AgentSidebar.tsx";
 import type { TicketRow } from "../shared/tickets.ts";
+import { ownOpen } from "../shared/today.ts";
 import type { Activity } from "../shared/activity.ts";
 
 type Theme = "dark" | "light";
@@ -45,7 +47,7 @@ export function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
-  const [view, setView] = useState<View>("tickets");
+  const [view, setView] = useState<View>("today");
   const [openTicket, setOpenTicket] = useState<number | null>(null);
   const [timesDay, setTimesDay] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -53,7 +55,8 @@ export function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [tanssDown, setTanssDown] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [subtitle, setSubtitle] = useState("");
+  // The views still report a subtitle; the redesign shows it in their own page head.
+  const [, setSubtitle] = useState("");
   const [agent, setAgent] = useState<AgentSettings | null>(null);
   const [sidebar, setSidebar] = useState(readSidebar);
   const [board, setBoard] = useState<{ rows: TicketRow[]; activity: Record<number, Activity> }>({ rows: [], activity: {} });
@@ -165,7 +168,7 @@ export function App() {
     try {
       const result = await api.login(username, password, token);
       setEmployeeId(result.employeeId);
-      setView("tickets");
+      setView("today");
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Anmeldung fehlgeschlagen");
     } finally {
@@ -189,7 +192,7 @@ export function App() {
     setView(next);
   }
 
-  // g t / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
+  // g h / g t / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
   const chord = useRef<number | null>(null);
   useEffect(() => {
     if (!employeeId) return;
@@ -224,7 +227,7 @@ export function App() {
           setSidebar((o) => !o);
           return;
         }
-        const target = { d: "dashboard", t: "tickets", z: "times", w: "analysis", i: "import", l: "log", s: "settings" }[key];
+        const target = { h: "today", d: "dashboard", t: "tickets", z: "times", w: "analysis", i: "import", l: "log", s: "settings" }[key];
         if (target) {
           event.preventDefault();
           goto(target as View);
@@ -273,7 +276,7 @@ export function App() {
         }
         userName={meta?.technicians.find((t) => t.id === employeeId)?.name ?? ""}
         employeeId={employeeId}
-        subtitle={subtitle}
+        counts={board.rows.length ? { tickets: ownOpen(board.rows, employeeId).length } : undefined}
         query={query}
         onQuery={setQuery}
         showSearch={view === "tickets"}
@@ -318,6 +321,18 @@ export function App() {
           </>
         }
       >
+        {view === "today" ? (
+          <TodayView
+            meta={meta}
+            employeeId={employeeId}
+            agentReady={Boolean(agent?.ready)}
+            reload={reload}
+            onOpen={setOpenTicket}
+            onView={goto}
+            onError={report}
+            onData={onBoardData}
+          />
+        ) : null}
         {view === "dashboard" ? (
           <DashboardView
             reload={reload}
@@ -349,6 +364,8 @@ export function App() {
             onToast={showToast}
             onSaved={setAgent}
             onUpdateOverview={updates.replace}
+            theme={theme}
+            onTheme={setTheme}
           />
         ) : null}
         {view === "times" ? (

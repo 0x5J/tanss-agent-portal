@@ -20,7 +20,9 @@ import {
 import { berlinYmd, formatShortDate } from "../../shared/days.ts";
 import { DAY_TARGET, formatHours, type Support } from "../../shared/timeline.ts";
 import { todayYmd } from "../format.ts";
-import { DonutCard, HBars, StatTile } from "../ui/charts.tsx";
+import { RankRows } from "../ui/charts.tsx";
+import { Dot, Icon, KeyDot, PageHeader, Ring, SectionTitle, Tile } from "../ui/kit.tsx";
+import "../styles/dashboard.css";
 import { TimeBars } from "./AnalysisCharts.tsx";
 
 type Props = {
@@ -34,6 +36,9 @@ type Props = {
 };
 
 const TOP = 10;
+/** Rows the bookings table renders; the CSV carries every booking. */
+const ROWS_SHOWN = 100;
+const nf = new Intl.NumberFormat("de-DE");
 
 export function AnalysisView(props: Props) {
   const me = props.meta?.employeeId ?? 0;
@@ -58,6 +63,25 @@ export function AnalysisView(props: Props) {
    */
   const [problem, setProblem] = useState<string | null>(null);
   const [facet, setFacet] = useState<Facet>(null);
+  const [whoOpen, setWhoOpen] = useState(false);
+  const whoRef = useRef<HTMLDivElement | null>(null);
+
+  // The person menu closes on any click outside it, like a native select.
+  useEffect(() => {
+    if (!whoOpen) return;
+    function onDown(event: MouseEvent) {
+      if (!whoRef.current?.contains(event.target as Node)) setWhoOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setWhoOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [whoOpen]);
   /** Ranges already fetched — going back must not fetch again. */
   const cache = useRef(new Map<string, Support[]>());
   const { onError, onSubtitle } = props;
@@ -143,16 +167,17 @@ export function AnalysisView(props: Props) {
   const companies = useMemo(() => topWithRest(groupBy(shown, "company"), TOP), [shown]);
   const types = useMemo(() => topWithRest(groupBy(shown, "type"), 6), [shown]);
 
+  const span = `${formatShortDate(range.from)} – ${formatShortDate(range.to)}`;
+  // The view looks identical whoever is shown, so the name travels with the
+  // heading. Reading someone else's hours as your own is the one mistake this
+  // view must not allow. Without a result there is no sum to carry — the
+  // previous range's hours under the new dates would be the same lie the
+  // result area refuses.
+  const whose = foreign ? `${whoName} · ` : "";
+  const subtitle = problem || loading ? `${whose}${span}` : `${whose}${span} · ${formatHours(sums.minutes)}`;
   useEffect(() => {
-    const span = `${formatShortDate(range.from)}–${formatShortDate(range.to)}`;
-    // The view looks identical whoever is shown, so the name travels with the
-    // heading. Reading someone else's hours as your own is the one mistake
-    // this view must not allow.
-    const whose = foreign ? `${whoName} · ` : "";
-    // Without a result there is no sum to carry — the previous range's hours
-    // under the new dates would be the same lie the result area refuses.
-    onSubtitle(problem ? `${whose}${span}` : `${whose}${span} · ${formatHours(sums.minutes)}`);
-  }, [onSubtitle, range, sums.minutes, problem, foreign, whoName]);
+    onSubtitle(subtitle);
+  }, [onSubtitle, subtitle]);
 
   const target = sums.targetMinutes;
   const share = (part: number) => (sums.minutes > 0 ? `${Math.round((part / sums.minutes) * 100)} %` : "—");
@@ -164,93 +189,118 @@ export function AnalysisView(props: Props) {
   const wholeShare =
     whole.minutes > 0 ? `${Math.round((sums.minutes / whole.minutes) * 100)} %` : "—";
 
+  const technicians = props.meta?.technicians ?? [];
+  const people = [{ id: 0, label: "Meine Zeiten" }, ...technicians.filter((t) => t.id !== me).map((t) => ({ id: t.id, label: t.name }))];
+  const whoLabel = people.find((p) => p.id === who)?.label ?? "Meine Zeiten";
+  const perDay = size === "day";
+  // Newest first — the latest bookings are the ones you check.
+  const shownRows = [...shown].sort((a, b) => b.date - a.date || b.id - a.id).slice(0, ROWS_SHOWN);
+  const facetText = facetLabel(facet, { ticket: tickets, company: companies, type: types });
+
   return (
-    <div className="dash">
-      <div className="viz-card">
-        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+    <div className="view analysis-view">
+      <PageHeader title="Auswertung" subtitle={subtitle}>
+        <button
+          className="btn primary lg"
+          disabled={loading || problem !== null || shown.length === 0}
+          onClick={() => downloadCsv(shown, range, foreign ? whoName : "")}
+          title="Die Buchungen dieser Ansicht (mit Filter) als CSV für Excel"
+        >
+          CSV exportieren
+        </button>
+      </PageHeader>
+
+      <div className="soft-card p20 filter-card">
+        <div className="preset-row">
           {PRESETS.map((p) => (
-            <button key={p.id} className={`btn ghost small${preset === p.id ? " active" : ""}`} onClick={() => pick(p.id)}>
+            <button key={p.id} className={`preset${preset === p.id ? " active" : ""}`} onClick={() => pick(p.id)}>
               {p.label}
             </button>
           ))}
-          <span className="spacer" style={{ marginLeft: "auto" }} />
-          <input
-            className="input"
-            type="date"
-            value={range.from}
-            max={todayYmd()}
-            onChange={(e) => setEnd("from", e.target.value)}
-          />
-          <span className="tiny muted">bis</span>
-          <input
-            className="input"
-            type="date"
-            value={range.to}
-            max={todayYmd()}
-            onChange={(e) => setEnd("to", e.target.value)}
-          />
-          {props.meta && props.meta.technicians.length > 0 ? (
-            <select
-              className="input"
-              value={who}
-              onChange={(e) => {
-                setWho(Number(e.target.value));
-                setFacet(null);
-              }}
-            >
-              <option value={0}>Meine Zeiten</option>
-              {props.meta.technicians
-                .filter((t) => t.id !== me)
-                .map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-            </select>
+        </div>
+        <div className="range-row">
+          <label className="range-field">
+            <span>Von</span>
+            <input type="date" value={range.from} max={todayYmd()} onChange={(e) => setEnd("from", e.target.value)} />
+          </label>
+          <label className="range-field">
+            <span>bis</span>
+            <input type="date" value={range.to} max={todayYmd()} onChange={(e) => setEnd("to", e.target.value)} />
+          </label>
+          {technicians.length > 0 ? (
+            <div className="an-who" ref={whoRef}>
+              <button className="who-button" aria-haspopup="listbox" aria-expanded={whoOpen} onClick={() => setWhoOpen((o) => !o)}>
+                <span>{whoLabel}</span>
+                <Icon d="m6 9 6 6 6-6" size={14} stroke={2} />
+              </button>
+              {whoOpen ? (
+                <div className="popover who-menu" role="listbox">
+                  {people.map((p, i) => (
+                    <button
+                      key={p.id}
+                      role="option"
+                      aria-selected={who === p.id}
+                      className={`popover-item${who === p.id ? " active" : ""}${i === 0 ? " first" : ""}`}
+                      onClick={() => {
+                        setWho(p.id);
+                        setFacet(null);
+                        setWhoOpen(false);
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>{p.label}</span>
+                      {who === p.id ? <Icon d="M20 6 9 17l-5-5" size={14} stroke={2.5} /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         {foreign ? (
           // The tiles, bars and table look exactly the same whoever is shown.
           // Without this line a glance after coming back reads someone else's
           // hours as your own.
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <span className="badge" style={{ color: "var(--warn)" }}>
+          <div className="filter-note">
+            <span className="foreign-pill">
+              <Dot tone="warn" />
               Zeiten von {whoName}
             </span>
-            <button className="btn ghost small" onClick={() => setWho(0)}>
+            <button className="linkish" onClick={() => setWho(0)}>
               Zurück zu meinen
             </button>
           </div>
         ) : null}
         {facet ? (
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <span className="filter-chip">{facetLabel(facet, { ticket: tickets, company: companies, type: types })}</span>
-            <button className="btn ghost small" onClick={() => setFacet(null)}>
-              Filter aufheben
-            </button>
+          <div className="filter-note">
+            <span className="facet-pill">
+              {facetText}
+              <button onClick={() => setFacet(null)} title="Filter aufheben" aria-label="Filter aufheben">
+                <Icon d="M18 6 6 18M6 6l12 12" size={10} stroke={3} />
+              </button>
+            </span>
+            <span className="small muted">Klick auf Balken oder Legende filtert, erneuter Klick hebt auf.</span>
           </div>
         ) : null}
       </div>
 
       {loading ? (
         // One quiet placeholder for the whole result area — the tiles, bars,
-        // donut and table all read off `shown`, which still holds the
-        // previous range's data while the new one is in flight. Showing them
-        // here would read as an answer about the new range that it is not.
-        <div className="viz-card">
-          <div className="small muted" style={{ padding: "18px 0" }}>Lädt …</div>
-        </div>
+        // ring and table all read off `shown`, which still holds the previous
+        // range's data while the new one is in flight. Showing them here would
+        // read as an answer about the new range that it is not.
+        <div className="empty-note">Lädt …</div>
       ) : problem ? (
-        // The same area the loading hint covers. Tiles, bars, donut and table
-        // all read off the previous range's bookings; showing them under the
-        // new heading would answer a question that was never answered.
-        <div className="viz-card">
-          <div className="small" style={{ padding: "18px 0", color: "var(--danger)" }}>{problem}</div>
+        // The same area the loading hint covers. Everything below reads off
+        // the previous range's bookings; showing it under the new heading
+        // would answer a question that was never answered.
+        <div className="problem-note">
+          <Dot tone="danger" />
+          {problem}
         </div>
       ) : (
         <>
-          <div className="dash-tiles">
-            <StatTile
+          <div className="tiles wide">
+            <Tile
               label="Gebucht"
               value={formatHours(sums.minutes)}
               hint={
@@ -259,11 +309,11 @@ export function AnalysisView(props: Props) {
                   : `Soll ${formatHours(target)} (${sums.workdays} Werktage) · ${target ? Math.round((sums.minutes / target) * 100) : 0} %`
               }
             />
-            <StatTile label="Abrechenbar" value={formatHours(sums.billable)} hint={`${share(sums.billable)} · nicht berechnet ${formatHours(sums.notCharged)}`} />
-            <StatTile label="Intern" value={formatHours(sums.internal)} hint={share(sums.internal)} />
-            <StatTile label="Freigegeben" value={formatHours(sums.cleared)} hint={`offen ${formatHours(sums.open)}`} />
+            <Tile label="Abrechenbar" value={formatHours(sums.billable)} hint={`${share(sums.billable)} · nicht berechnet ${formatHours(sums.notCharged)}`} />
+            <Tile label="Intern" value={formatHours(sums.internal)} hint={share(sums.internal)} />
+            <Tile label="Freigegeben" value={formatHours(sums.cleared)} hint={`offen ${formatHours(sums.open)}`} />
             {drilled ? null : (
-              <StatTile
+              <Tile
                 label="Werktage ohne Buchung"
                 value={String(sums.daysWithout.length)}
                 hint={sums.daysWithout.map((d) => formatShortDate(d).slice(0, 6)).join(" ") || "keiner"}
@@ -272,107 +322,115 @@ export function AnalysisView(props: Props) {
             )}
           </div>
 
-          <div className="viz-card">
-            <div className="viz-title" style={{ marginBottom: 8 }}>
-              Verlauf {size === "day" ? "je Tag" : size === "week" ? "je Woche" : "je Monat"}
-            </div>
+          <section className="section">
+            <SectionTitle
+              title={`Verlauf ${perDay ? "je Tag" : size === "week" ? "je Woche" : "je Monat"}`}
+              note={
+                perDay
+                  ? foreign
+                    ? ""
+                    : "Klick auf einen Tag öffnet den Tagesbogen"
+                  : "Über 45 Tage wird je Woche gezeigt; ohne Soll-Linie"
+              }
+            />
             {/* The day sheet only ever shows my own bookings, so a bar of
                 someone else's has nowhere honest to jump — better no click
                 than one that quietly lands on my day. */}
-            <TimeBars
-              slots={slots}
-              targetPerSlot={size === "day" ? DAY_TARGET : undefined}
-              onPick={foreign ? undefined : props.onDay}
-            />
-          </div>
+            <TimeBars slots={slots} targetPerSlot={perDay ? DAY_TARGET : undefined} onPick={foreign ? undefined : props.onDay} />
+          </section>
 
-          <div className="dash-row">
-            <div className="viz-card" style={{ marginBottom: 0 }}>
-              <div className="viz-title" style={{ marginBottom: 8 }}>Top-Tickets</div>
-              <HBars
-                rows={tickets.map((g) => ({
-                  id: g.id === REST_ID ? undefined : g.id,
-                  label: g.label,
-                  title: g.hint || g.label,
-                  count: g.minutes,
-                }))}
+          <div className="dash-pair">
+            <section className="section dash-pair-half">
+              <SectionTitle title="Top-Tickets" />
+              <RankRows
+                rows={tickets.map((g) => ({ id: g.id === REST_ID ? undefined : g.id, label: g.label, title: g.hint || g.label, value: g.minutes }))}
                 format={formatHours}
                 empty="Keine Buchungen in diesem Zeitraum."
                 activeId={facet?.key === "ticket" ? facet.id : undefined}
-                valueWidth={56}
                 onPick={(id) => setFacet(facet?.key === "ticket" && facet.id === id ? null : { key: "ticket", id })}
               />
-            </div>
-            <div className="viz-card" style={{ marginBottom: 0 }}>
-              <div className="viz-title" style={{ marginBottom: 8 }}>Top-Kunden</div>
-              <HBars
-                rows={companies.map((g) => ({
-                  id: g.id === REST_ID ? undefined : g.id,
-                  label: g.label,
-                  title: g.hint || g.label,
-                  count: g.minutes,
-                }))}
+            </section>
+            <section className="section dash-pair-half">
+              <SectionTitle title="Top-Kunden" />
+              <RankRows
+                rows={companies.map((g) => ({ id: g.id === REST_ID ? undefined : g.id, label: g.label, title: g.hint || g.label, value: g.minutes }))}
                 format={formatHours}
                 empty="Keine Buchungen in diesem Zeitraum."
                 activeId={facet?.key === "company" ? facet.id : undefined}
-                valueWidth={56}
                 onPick={(id) => setFacet(facet?.key === "company" && facet.id === id ? null : { key: "company", id })}
               />
-            </div>
+            </section>
           </div>
 
-          <DonutCard
-            title="Leistungsarten"
-            segments={types.map((g) => ({ id: g.id === REST_ID ? undefined : g.id, label: g.label, count: g.minutes }))}
-            total={sums.minutes}
-            format={formatHours}
-            unit="gebucht"
-            empty="Keine Buchungen in diesem Zeitraum."
-            centerFontSize={22}
-            activeId={facet?.key === "type" ? facet.id : undefined}
-            onPick={(id) => setFacet(facet?.key === "type" && facet.id === id ? null : { key: "type", id })}
-          />
-
-          <div className="viz-card">
-            <div className="viz-title" style={{ marginBottom: 8 }}>Buchungen ({shown.length})</div>
-            <div className="times-table">
-              <div className="line">
-                <span className="tiny muted" style={{ flex: "none", width: 82 }}>Datum</span>
-                <span className="tiny muted" style={{ flex: "none", width: 64 }}>Dauer</span>
-                <span className="tiny muted" style={{ flex: "none", width: 70 }}>Ticket</span>
-                <span className="tiny muted" style={{ flex: "none", width: 160 }}>Kunde</span>
-                <span className="tiny muted" style={{ flex: "none", width: 140 }}>Art</span>
-                <span className="tiny muted" style={{ flex: 1, minWidth: 0 }}>Text</span>
-              </div>
-              {shown.map((s) => (
-                <div key={s.id} className="line">
-                  <span className="mono" style={{ flex: "none", width: 82 }}>{formatShortDate(berlinDay(s))}</span>
-                  <span className="mono" style={{ flex: "none", width: 64 }}>{formatHours(s.duration)}</span>
-                  <span style={{ flex: "none", width: 70 }}>
-                    {s.ticketId ? (
-                      <button className="btn ghost small" onClick={() => props.onOpen(s.ticketId)}>
-                        #{s.ticketId}
+          <section className="soft-card">
+            <SectionTitle title="Leistungsarten" />
+            {sums.minutes === 0 ? (
+              <span className="muted">Keine Buchungen in diesem Zeitraum.</span>
+            ) : (
+              <div className="ring-wrap wide">
+                <Ring segments={types.map((g) => ({ label: g.label, value: g.minutes }))} total={formatHours(sums.minutes)} unit="gebucht" size={150} />
+                <div className="type-rows">
+                  {types.map((g, i) => {
+                    const id = g.id === REST_ID ? undefined : g.id;
+                    const active = facet?.key === "type" && facet.id === id;
+                    return (
+                      <button
+                        key={g.id}
+                        className={`type-row${active ? " active" : ""}`}
+                        disabled={!id}
+                        onClick={() => id && setFacet(active ? null : { key: "type", id })}
+                      >
+                        <KeyDot index={i} />
+                        <span className="label">{g.label}</span>
+                        <span className="share">{share(g.minutes)}</span>
+                        <span className="val">{formatHours(g.minutes)}</span>
                       </button>
-                    ) : (
-                      <span className="tiny muted">—</span>
-                    )}
-                  </span>
-                  <span className="ellipsis" style={{ flex: "none", width: 160 }} title={s.companyName}>
-                    {s.companyName}
-                  </span>
-                  <span className="ellipsis" style={{ flex: "none", width: 140 }} title={s.typeName}>
-                    {s.typeName}
-                  </span>
-                  <span className="ellipsis" style={{ flex: 1, minWidth: 0 }} title={s.text}>
-                    {s.text}
-                  </span>
+                    );
+                  })}
                 </div>
-              ))}
+              </div>
+            )}
+          </section>
+
+          <section className="section">
+            <SectionTitle title="Buchungen" note={nf.format(shown.length)} />
+            <div className="table-scroll">
+              <div className="table bookings">
+                <div className="thead">
+                  <span>Datum</span>
+                  <span>Dauer</span>
+                  <span>Ticket</span>
+                  <span>Kunde</span>
+                  <span>Art</span>
+                  <span>Text</span>
+                </div>
+                {shownRows.map((s) => (
+                  <div key={s.id} className="trow">
+                    <span className="num-cell">{formatShortDate(berlinDay(s)).slice(0, 6)}</span>
+                    <span className="num-cell strong">{formatHours(s.duration)}</span>
+                    <span>
+                      {s.ticketId ? (
+                        <button className="linkish" onClick={() => props.onOpen(s.ticketId)}>
+                          #{s.ticketId}
+                        </button>
+                      ) : (
+                        <span className="mute">—</span>
+                      )}
+                    </span>
+                    <span className="ellipsis" title={s.companyName}>{s.companyName}</span>
+                    <span className="ellipsis muted" title={s.typeName}>{s.typeName}</span>
+                    <span className="ellipsis" title={s.text}>{s.text}</span>
+                  </div>
+                ))}
+                {shown.length > shownRows.length ? (
+                  <div className="table-more">
+                    {nf.format(shown.length - shownRows.length)} weitere Buchungen – der CSV-Export enthält alle.
+                  </div>
+                ) : null}
+                {shown.length === 0 ? <div className="empty-inline">Keine Buchungen in diesem Zeitraum.</div> : null}
+              </div>
             </div>
-            {shown.length === 0 ? (
-              <div className="small muted" style={{ padding: "18px 0" }}>Keine Buchungen in diesem Zeitraum.</div>
-            ) : null}
-          </div>
+          </section>
         </>
       )}
     </div>
@@ -403,3 +461,52 @@ function facetLabel(facet: Facet, byKey: Record<GroupKey, Group[]>): string {
   const found = byKey[facet.key].find((g) => g.id === facet.id);
   return `${noun}: ${found?.label ?? facet.id}`;
 }
+
+/**
+ * The bookings on screen as CSV for Excel: semicolons, decimal commas, a BOM
+ * so umlauts survive the double click. Built in the browser from what the
+ * view already holds — no second round trip to TANSS.
+ */
+function downloadCsv(supports: Support[], range: Range, whose: string) {
+  const cell = (raw: string) => {
+    // Texts and customer names come from TANSS; one starting with = + - @ would run
+    // as a formula in Excel. Numbers stay numbers, everything else is forced to text.
+    const value = /^[=+\-@\t\r]/.test(raw) && !/^-?\d+([.,]\d+)?$/.test(raw) ? `'${raw}` : raw;
+    return /[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  };
+  const header = ["Datum", "Beginn", "Dauer (min)", "Dauer (h)", "Ticket", "Kunde", "Art", "Ort", "Intern", "Nicht berechnet (min)", "Freigabe", "Text"];
+  const lines = [...supports]
+    .sort((a, b) => a.date - b.date)
+    .map((s) => {
+      const start = new Date(s.date * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+      return [
+        formatShortDate(berlinDay(s)),
+        start,
+        String(s.duration),
+        (s.duration / 60).toFixed(2).replace(".", ","),
+        s.ticketId ? String(s.ticketId) : "",
+        s.companyName,
+        s.typeName,
+        LOCATION_LABEL[s.location] ?? s.location,
+        s.internal ? "ja" : "nein",
+        String(s.durationNotCharged),
+        s.clearanceStatus === "CLEARED" ? "freigegeben" : "offen",
+        s.text.replace(/\s+/g, " ").trim(),
+      ]
+        .map(cell)
+        .join(";");
+    });
+  const csv = "\ufeff" + [header.join(";"), ...lines].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const who = whose ? `-${whose.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-")}` : "";
+  a.download = `buchungen${who}-${range.from}-bis-${range.to}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const LOCATION_LABEL: Record<string, string> = { OFFICE: "Büro", REMOTE: "Remote", CUSTOMER: "Beim Kunden" };

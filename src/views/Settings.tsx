@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type AgentSettings } from "../api.ts";
+import { api, ApiError, type AgentSettings, type AuthConfig } from "../api.ts";
 import { dayAndClock } from "../format.ts";
-import type { UpdateOverview } from "../../shared/update.ts";
+import { updateIndicator, type UpdateOverview } from "../../shared/update.ts";
 import { threadBudget } from "../../shared/agent.ts";
 import {
   MAX_ROUTINES,
@@ -12,6 +12,11 @@ import {
   type Routine,
 } from "../../shared/routines.ts";
 import { DEFAULT_STYLE_RULES, MAX_EXAMPLES, type StyleSettings } from "../../shared/style.ts";
+import { confirmAndStartUpdate } from "../UpdateBanner.tsx";
+import { Dot, Icon, PageHeader, SectionTitle, Segmented } from "../ui/kit.tsx";
+import "../styles/settings.css";
+
+type Theme = "light" | "dark";
 
 type Props = {
   onSubtitle: (text: string) => void;
@@ -20,13 +25,49 @@ type Props = {
   onSaved: (settings: AgentSettings) => void;
   /** A fresh check result, so the navigation shows it right away. */
   onUpdateOverview: (overview: UpdateOverview) => void;
+  /** Current theme and its setter; without them the row points to the navigation toggle. */
+  theme?: Theme;
+  onTheme?: (theme: Theme) => void;
 };
 
+type Tab = "general" | "connections" | "ai" | "agent" | "texts";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "general", label: "Allgemein" },
+  { id: "connections", label: "Verbindungen" },
+  { id: "ai", label: "Lokale KI" },
+  { id: "agent", label: "Agent" },
+  { id: "texts", label: "Texte & Bausteine" },
+];
+
+const TAB_KEY = "agent-portal:settings-tab";
+
+function readTab(): Tab {
+  try {
+    const stored = localStorage.getItem(TAB_KEY);
+    if (TABS.some((t) => t.id === stored)) return stored as Tab;
+  } catch {
+    /* private mode */
+  }
+  return "general";
+}
+
+const AGENT_DOES: { where: string; what: string }[] = [
+  { where: "Tickets", what: "Briefing und Muster über die sichtbaren Zeilen." },
+  { where: "Ticket", what: "Verlauf zusammenfassen, Kommentar entwerfen, nächsten Schritt vorschlagen." },
+  { where: "Mehrfachauswahl", what: "Gemeinsamen Kommentar für alle gewählten Tickets entwerfen." },
+  { where: "Zeiten", what: "Schlägt vor, was in die Lücken des Tages passt, und entwirft Leistungstexte." },
+  { where: "Tagesimport", what: "Bringt die Notizen aus Linear in die Form eines Leistungstexts." },
+  { where: "Chat", what: "Beantwortet Fragen zu Tickets und dem Tag; liest dafür selbst in TANSS nach." },
+];
+
 /**
- * Where the local model lives. The key is stored on the server only; the
- * form shows a hint and sends a new value just when the field was touched.
+ * Everything adjustable, sorted into five tabs. The local model's form lives
+ * here at the top so its unsaved edits survive switching tabs; the key is
+ * stored on the server only and sent just when the field was touched.
  */
 export function SettingsView(props: Props) {
+  const [tab, setTab] = useState<Tab>(readTab);
   const [stored, setStored] = useState<AgentSettings | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -43,9 +84,18 @@ export function SettingsView(props: Props) {
   const [testResult, setTestResult] = useState<string | null>(null);
   const { onSubtitle, onError } = props;
 
+  const tabLabel = TABS.find((t) => t.id === tab)?.label ?? "";
   useEffect(() => {
-    onSubtitle("Lokales KI-Modell");
-  }, [onSubtitle]);
+    onSubtitle(tabLabel);
+  }, [onSubtitle, tabLabel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TAB_KEY, tab);
+    } catch {
+      /* ignore */
+    }
+  }, [tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,144 +153,387 @@ export function SettingsView(props: Props) {
     }
   }
 
-  async function test() {
-    setTesting(true);
-    setTestResult(null);
+  /** One short request to the model; shared by the KI tab and the connection card. */
+  async function testModel(): Promise<{ ok: boolean; text: string }> {
     try {
       const result = await api.agent.test();
       const toolsNote = result.tools
         ? "Das Modell kann Werkzeuge — der Chat sieht selbst in TANSS nach."
         : "Das Modell kann keine Werkzeuge; der Chat nutzt den festen Kontext und Tickets mit # in der Frage.";
-      setTestResult(`Antwort in ${(result.durationMs / 1000).toFixed(1)} s: „${result.answer}" ${toolsNote}`);
+      return { ok: true, text: `Antwort in ${(result.durationMs / 1000).toFixed(1)} s: „${result.answer}" ${toolsNote}` };
     } catch (error) {
-      setTestResult(error instanceof Error ? error.message : "Test fehlgeschlagen");
-    } finally {
-      setTesting(false);
+      return { ok: false, text: error instanceof Error ? error.message : "Test fehlgeschlagen" };
     }
   }
 
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    setTestResult((await testModel()).text);
+    setTesting(false);
+  }
+
   return (
-    <div className="page" style={{ maxWidth: 784 }}>
-      <h2 style={{ fontSize: 15, marginBottom: 4 }}>Lokale KI</h2>
-      <p className="small muted pretty" style={{ marginBottom: 14, maxWidth: "68ch" }}>
-        Ein OpenAI-kompatibler Endpoint auf dem eigenen Rechner oder im eigenen Netz — oMLX, Ollama,
-        LM Studio oder vLLM. Ticket- und Kundendaten gehen nur dorthin. Aus dem Container heraus ist
-        der Host als <span className="mono">host.docker.internal</span> erreichbar.
-      </p>
-
-      <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <label className="field">
-          <span className="small muted">Basis-URL</span>
-          <input
-            className="input mono"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="http://host.docker.internal:11434/v1"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <span className="tiny muted">„/v1" wird ergänzt, wenn es fehlt.</span>
-        </label>
-
-        <label className="field">
-          <span className="small muted">API-Key (optional)</span>
-          <input
-            className="input mono"
-            type="password"
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              setKeyTouched(true);
-            }}
-            placeholder={stored?.hasKey ? `gespeichert (${stored.keyHint}) — leer lassen zum Behalten` : "kein Key"}
-            autoComplete="new-password"
-          />
-          {stored?.hasKey && keyTouched && apiKey === "" ? (
-            <span className="tiny" style={{ color: "var(--warn)" }}>Speichern löscht den gespeicherten Key.</span>
-          ) : (
-            <span className="tiny muted">Wird nur auf dem Server gespeichert und nie vollständig angezeigt.</span>
-          )}
-        </label>
-
-        <div className="field">
-          <span className="small muted">Modell</span>
-          <div className="row">
-            {models.length ? (
-              <select className="select" value={model} onChange={(e) => setModel(e.target.value)} style={{ minWidth: 260 }}>
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                className="input mono"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="Modellname"
-                style={{ minWidth: 260 }}
-                spellCheck={false}
-              />
-            )}
-            <button className="btn" disabled={!baseUrl.trim() || loadingModels} onClick={() => void loadModels()}>
-              {loadingModels ? "lädt …" : "Modelle laden"}
+    <div className="view">
+      <PageHeader title="Einstellungen" />
+      <div className="settings-layout">
+        <nav className="settings-tabs" aria-label="Bereiche">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              className={`settings-tab${tab === t.id ? " active" : ""}`}
+              aria-current={tab === t.id ? "page" : undefined}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
             </button>
-          </div>
-          {modelsError ? <span className="tiny" style={{ color: "var(--danger)" }}>{modelsError}</span> : null}
-        </div>
+          ))}
+        </nav>
 
-        <label className="field">
-          <span className="small muted">Kontextfenster des Modells (Tokens)</span>
-          <div className="row">
-            <input
-              className="input mono"
-              type="number"
-              min={2048}
-              step={1024}
-              value={contextText}
-              onChange={(e) => setContextText(e.target.value)}
-              style={{ width: 140, borderColor: contextOk ? undefined : "var(--danger)" }}
-            />
-            <span className="tiny muted">
-              Daraus folgt, wie viel Ticketverlauf ein Prompt bekommt: bei {contextTokens.toLocaleString("de-DE")} Tokens etwa{" "}
-              {threadBudget(contextTokens).toLocaleString("de-DE")} Zeichen je Ticket.
-            </span>
-          </div>
-          <span className="tiny muted">Typisch: 32.768 (Qwen3, Mistral), 131.072 (Gemma 3 27B, Llama 3.x). Was oMLX tatsächlich lädt, steht in dessen Konfiguration.</span>
-        </label>
+        <div className="settings-body">
+          {tab === "general" ? (
+            <>
+              <div className="settings-rows">
+                <div className="settings-row">
+                  <span className="label">Erscheinungsbild</span>
+                  {props.onTheme && props.theme ? (
+                    <Segmented
+                      label="Erscheinungsbild"
+                      options={[
+                        { id: "light", label: "Hell" },
+                        { id: "dark", label: "Dunkel" },
+                      ]}
+                      value={props.theme}
+                      onChange={(t) => props.onTheme?.(t)}
+                    />
+                  ) : (
+                    <span className="muted">Umschalten unten in der Navigation</span>
+                  )}
+                </div>
+                <div className="settings-row">
+                  <span className="label">Sprache</span>
+                  <span className="muted">Deutsch</span>
+                </div>
+              </div>
+              <VersionSection onError={onError} onToast={props.onToast} onChecked={props.onUpdateOverview} />
+            </>
+          ) : null}
 
-        <div className="row" style={{ marginTop: 4 }}>
-          <button className="btn primary" disabled={saving || !dirty || !baseUrl.trim() || !model.trim() || !contextOk} onClick={() => void save()}>
-            {saving ? "Speichert …" : "Speichern"}
-          </button>
-          <button className="btn agent" disabled={testing || !stored?.ready || dirty} onClick={() => void test()} title={dirty ? "Erst speichern" : "Kurze Testanfrage an das Modell"}>
-            {testing ? "Fragt …" : "Verbindung testen"}
-          </button>
-          {testResult ? <span className="small muted">{testResult}</span> : null}
-          {stored && !stored.ready && !dirty ? (
-            <span className="small muted">Noch nicht eingerichtet — die Agent-Funktionen sind bis dahin inaktiv.</span>
+          {tab === "connections" ? (
+            <>
+              <ConnectionsSection
+                agent={stored}
+                onError={onError}
+                onTestModel={testModel}
+                onSetup={() => setTab("ai")}
+              />
+              <CollectorSection onError={onError} onToast={props.onToast} />
+            </>
+          ) : null}
+
+          {tab === "ai" ? (
+            <section className="section">
+              <p className="lead">
+                Ein OpenAI-kompatibler Endpoint auf dem eigenen Rechner oder im eigenen Netz — oMLX, Ollama, LM Studio
+                oder vLLM. Ticket- und Kundendaten gehen nur dorthin. Aus dem Container heraus ist der Host als{" "}
+                <span className="mono">host.docker.internal</span> erreichbar.
+              </p>
+
+              <div className="form-card">
+                <label className="field">
+                  <span>Basis-URL</span>
+                  <input
+                    className="input"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="http://host.docker.internal:11434/v1"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <span className="form-help">„/v1" wird ergänzt, wenn es fehlt.</span>
+                </label>
+
+                <label className="field">
+                  <span>API-Key (optional)</span>
+                  <input
+                    className="input"
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      setKeyTouched(true);
+                    }}
+                    placeholder={stored?.hasKey ? `gespeichert (${stored.keyHint}) — leer lassen zum Behalten` : "kein Key"}
+                    autoComplete="new-password"
+                  />
+                  {stored?.hasKey && keyTouched && apiKey === "" ? (
+                    <span className="form-help warn">Speichern löscht den gespeicherten Key.</span>
+                  ) : (
+                    <span className="form-help">Wird nur auf dem Server gespeichert und nie vollständig angezeigt.</span>
+                  )}
+                </label>
+
+                <div className="field">
+                  <span>Modell</span>
+                  <div className="row wrap">
+                    {models.length ? (
+                      <Segmented
+                        label="Modell"
+                        small
+                        onSoft
+                        options={models.map((m) => ({ id: m, label: m }))}
+                        value={model}
+                        onChange={setModel}
+                      />
+                    ) : (
+                      <input
+                        className="input"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        placeholder="Modellname"
+                        style={{ width: "auto", minWidth: 260 }}
+                        spellCheck={false}
+                      />
+                    )}
+                    <button className="btn" disabled={!baseUrl.trim() || loadingModels} onClick={() => void loadModels()}>
+                      {loadingModels ? "lädt …" : models.length ? "Neu laden" : "Modelle laden"}
+                    </button>
+                  </div>
+                  {modelsError ? <span className="form-help danger">{modelsError}</span> : null}
+                </div>
+
+                <label className="field">
+                  <span>Kontextfenster des Modells (Tokens)</span>
+                  <div className="row wrap" style={{ gap: 12 }}>
+                    <input
+                      className={`input mono${contextOk ? "" : " invalid"}`}
+                      type="number"
+                      min={2048}
+                      step={1024}
+                      value={contextText}
+                      onChange={(e) => setContextText(e.target.value)}
+                      style={{ width: 140 }}
+                    />
+                    <span className="small muted pretty" style={{ flex: "1 1 280px" }}>
+                      Daraus folgt, wie viel Ticketverlauf ein Prompt bekommt: bei {contextTokens.toLocaleString("de-DE")} Tokens
+                      etwa {threadBudget(contextTokens).toLocaleString("de-DE")} Zeichen je Ticket.
+                    </span>
+                  </div>
+                  <span className="form-help">
+                    Typisch: 32.768 (Qwen3, Mistral), 131.072 (Gemma 3 27B, Llama 3.x). Was oMLX tatsächlich lädt, steht in
+                    dessen Konfiguration.
+                  </span>
+                </label>
+
+                <div className="form-foot">
+                  <button
+                    className="btn primary"
+                    disabled={saving || !dirty || !baseUrl.trim() || !model.trim() || !contextOk}
+                    onClick={() => void save()}
+                  >
+                    {saving ? "Speichert …" : "Speichern"}
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={testing || !stored?.ready || dirty}
+                    onClick={() => void test()}
+                    title={dirty ? "Erst speichern" : "Kurze Testanfrage an das Modell"}
+                  >
+                    {testing ? "Fragt …" : "Verbindung testen"}
+                  </button>
+                  {testResult ? <span className="result">{testResult}</span> : null}
+                  {stored && !stored.ready && !dirty && !testResult ? (
+                    <span className="result">Noch nicht eingerichtet — die Agent-Funktionen sind bis dahin inaktiv.</span>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {tab === "agent" ? (
+            <>
+              <div className="status-card">
+                <Dot tone={stored?.ready ? "ok" : "flat"} />
+                <span className="pretty" style={{ flex: "1 1 280px" }}>
+                  {stored?.ready ? (
+                    <>
+                      Modell <span style={{ fontWeight: 500 }}>{stored.model}</span> ist eingerichtet. Alle Funktionen unten
+                      sind aktiv.
+                    </>
+                  ) : (
+                    "Kein Modell eingerichtet — bis dahin sind die Agent-Funktionen aus."
+                  )}
+                </span>
+                <button className="btn" onClick={() => setTab("ai")}>
+                  {stored?.ready ? "Modell ändern" : "KI einrichten"}
+                </button>
+              </div>
+              <section className="section">
+                <SectionTitle title="Was der Agent tut" />
+                <div className="table">
+                  {AGENT_DOES.map((d) => (
+                    <div key={d.where} className="does-row">
+                      <span className="where">{d.where}</span>
+                      <span className="what">{d.what}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="lead">
+                  Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen machst du selbst.
+                </p>
+              </section>
+            </>
+          ) : null}
+
+          {tab === "texts" ? (
+            <>
+              <StyleSection onError={onError} onToast={props.onToast} />
+              <RoutinesSection onError={onError} onToast={props.onToast} />
+            </>
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
 
-      <CollectorSection onError={onError} onToast={props.onToast} />
+type CardState = { tone: "ok" | "danger" | "flat" | "warn"; state: string; result: string; busy: boolean };
 
-      <StyleSection onError={onError} onToast={props.onToast} />
+/**
+ * One card per system the portal talks to. Each "testen" makes one real,
+ * read-only call; nothing here changes a setting.
+ */
+function ConnectionsSection(props: {
+  agent: AgentSettings | null;
+  onError: (error: unknown) => void;
+  onTestModel: () => Promise<{ ok: boolean; text: string }>;
+  onSetup: () => void;
+}) {
+  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const [tanss, setTanss] = useState<CardState>({ tone: "flat", state: "nicht geprüft", result: "", busy: false });
+  const [linear, setLinear] = useState<CardState>({ tone: "flat", state: "nicht geprüft", result: "", busy: false });
+  const [model, setModel] = useState<CardState>({ tone: "flat", state: "nicht geprüft", result: "", busy: false });
+  const { onError } = props;
 
-      <RoutinesSection onError={onError} onToast={props.onToast} />
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .config()
+      .then((c) => !cancelled && setConfig(c))
+      .catch((error: unknown) => !cancelled && onError(error));
+    return () => {
+      cancelled = true;
+    };
+  }, [onError]);
 
-      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Was der Agent tut</h2>
-      <div className="small muted pretty" style={{ maxWidth: "68ch", display: "flex", flexDirection: "column", gap: 4 }}>
-        <span>· Tickets: Briefing und Muster über die sichtbaren Zeilen.</span>
-        <span>· Ticket-Drawer: Thread zusammenfassen, Kommentar entwerfen.</span>
-        <span>· Mehrfachauswahl: gemeinsamen Kommentar entwerfen.</span>
-        <span>· Zeiten: Assistent schlägt vor, was in die Lücken des Tages passt.</span>
-        <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen machst du selbst.</span>
+  async function testTanss() {
+    setTanss((s) => ({ ...s, busy: true }));
+    try {
+      const meta = await api.meta();
+      setTanss({
+        tone: "ok",
+        state: "verbunden",
+        result: `Antwort von TANSS: ${meta.states.length} Status, ${meta.technicians.length} Techniker, ${meta.supportTypes.length} Leistungsarten.`,
+        busy: false,
+      });
+    } catch (error) {
+      setTanss({ tone: "danger", state: "gestört", result: error instanceof Error ? error.message : "Keine Antwort", busy: false });
+    }
+  }
+
+  async function testLinear() {
+    setLinear((s) => ({ ...s, busy: true }));
+    try {
+      const result = await api.import.states();
+      setLinear({
+        tone: result.enabled ? "ok" : "warn",
+        state: result.enabled ? "verbunden" : "nicht eingerichtet",
+        result: result.enabled ? `${result.items.length} Workflow-Status gelesen.` : "Der Server hat keinen Linear-Key.",
+        busy: false,
+      });
+    } catch (error) {
+      setLinear({ tone: "danger", state: "gestört", result: error instanceof Error ? error.message : "Keine Antwort", busy: false });
+    }
+  }
+
+  async function testModel() {
+    setModel((s) => ({ ...s, busy: true }));
+    const result = await props.onTestModel();
+    setModel({ tone: result.ok ? "ok" : "danger", state: result.ok ? "antwortet" : "gestört", result: result.text, busy: false });
+  }
+
+  const linearOn = config?.linear ?? false;
+  const agentReady = props.agent?.ready ?? false;
+  const host = (url: string) => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  };
+
+  return (
+    <section className="section">
+      <div className="status-card big">
+        <div className="name">
+          <strong>TANSS</strong>
+          <span className="small muted">
+            Tickets, Zeiten und Anmeldung ·{" "}
+            {config ? (config.tokenRequired ? "2FA-Code bei der Anmeldung" : "2FA aus hinterlegtem Token-Schlüssel") : "…"}
+          </span>
+        </div>
+        <span className="state">
+          <Dot tone={tanss.tone} />
+          {tanss.state}
+        </span>
+        <button className="btn" disabled={tanss.busy} onClick={() => void testTanss()}>
+          {tanss.busy ? "Prüfe …" : "Verbindung testen"}
+        </button>
+        {tanss.result ? <span className="result">{tanss.result}</span> : null}
       </div>
 
-      <VersionSection onError={props.onError} onToast={props.onToast} onChecked={props.onUpdateOverview} />
-    </div>
+      <div className="status-card big">
+        <div className="name">
+          <strong>Linear</strong>
+          <span className="small muted">
+            {linearOn ? "Quelle für den Tagesimport" : "Nicht eingerichtet — LINEAR_API_KEY in der .env setzen"}
+          </span>
+        </div>
+        <span className="state">
+          <Dot tone={linearOn ? linear.tone : "flat"} />
+          {linearOn ? linear.state : "aus"}
+        </span>
+        {linearOn ? (
+          <button className="btn" disabled={linear.busy} onClick={() => void testLinear()}>
+            {linear.busy ? "Prüfe …" : "Verbindung testen"}
+          </button>
+        ) : null}
+        {linear.result ? <span className="result">{linear.result}</span> : null}
+      </div>
+
+      <div className="status-card big">
+        <div className="name">
+          <strong>Lokale KI</strong>
+          <span className="small muted">
+            {agentReady && props.agent ? `${props.agent.model} · ${host(props.agent.baseUrl)}` : "Kein Modell eingerichtet"}
+          </span>
+        </div>
+        <span className="state">
+          <Dot tone={agentReady ? model.tone : "flat"} />
+          {agentReady ? model.state : "aus"}
+        </span>
+        {agentReady ? (
+          <button className="btn" disabled={model.busy} onClick={() => void testModel()}>
+            {model.busy ? "Fragt …" : "Verbindung testen"}
+          </button>
+        ) : (
+          <button className="btn primary" onClick={props.onSetup}>
+            Einrichten
+          </button>
+        )}
+        {model.result ? <span className="result">{model.result}</span> : null}
+      </div>
+    </section>
   );
 }
 
@@ -285,20 +578,22 @@ function VersionSection(props: {
     }
   }
 
+  const indicator = updateIndicator(overview, Date.now(), __APP_VERSION__);
+
   return (
-    <>
-      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Version</h2>
-      <p className="small muted">
+    <section className="section" style={{ gap: 12 }}>
+      <SectionTitle title="Version" />
+      <p className="lead">
         Agent-Portal {__APP_VERSION__} ·{" "}
         <a href="https://github.com/0x5J/tanss-agent-portal/releases" target="_blank" rel="noreferrer">
           Versionshinweise
         </a>
       </p>
       {overview ? (
-        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+        <div className="status-card">
           {overview.enabled ? (
             <>
-              <span className="small muted">Kanal: {overview.channel === "staging" ? "Staging" : "stabil"}</span>
+              <span>Kanal: {overview.channel === "staging" ? "Staging" : "stabil"}</span>
               {overview.checkError ? (
                 <span className="small" style={{ color: "var(--danger)" }}>
                   Prüfung fehlgeschlagen: {overview.checkError}
@@ -306,16 +601,35 @@ function VersionSection(props: {
               ) : overview.checkedAt ? (
                 <span className="small muted">zuletzt geprüft {dayAndClock(Math.floor(overview.checkedAt / 1000))}</span>
               ) : null}
-              <button className="btn" disabled={checking} onClick={() => void check()}>
-                {checking ? "Prüfe …" : "Jetzt prüfen"}
-              </button>
+              <span className="actions">
+                {indicator.start ? (
+                  <button
+                    className="btn primary"
+                    onClick={() =>
+                      void confirmAndStartUpdate(indicator.start!, {
+                        onOverview: (next) => {
+                          setOverview(next);
+                          onChecked(next);
+                        },
+                        onToast,
+                        onError,
+                      })
+                    }
+                  >
+                    Auf {indicator.start} aktualisieren
+                  </button>
+                ) : null}
+                <button className="btn" disabled={checking} onClick={() => void check()}>
+                  {checking ? "Prüfe …" : "Jetzt prüfen"}
+                </button>
+              </span>
             </>
           ) : (
             <span className="small muted">Update-Prüfung abgeschaltet (UPDATE_CHECK=0)</span>
           )}
         </div>
       ) : null}
-    </>
+    </section>
   );
 }
 
@@ -358,34 +672,33 @@ function CollectorSection(props: { onError: (error: unknown) => void; onToast: (
     unix ? new Date(unix * 1000).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "—";
 
   return (
-    <>
-      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Dashboard-Sammler</h2>
-      <p className="small muted pretty" style={{ marginBottom: 10, maxWidth: "68ch" }}>
-        Der Sammler zählt alle 5 Minuten die Ticketlisten und schreibt die Messpunkte für Verlauf,
-        Eingangs-Historie und Übernahmen. Er nutzt dafür die Sitzung aus deiner Anmeldung — es liegt
-        kein Passwort auf dem Server. Abmelden meldet alle Browser ab, nicht aber den Sammler.
+    <section className="section" style={{ gap: 12 }}>
+      <SectionTitle title="Dashboard-Sammler" />
+      <p className="lead">
+        Der Sammler zählt alle 5 Minuten die Ticketlisten und schreibt die Messpunkte für Verlauf, Eingangs-Historie und
+        Übernahmen. Er nutzt dafür die Sitzung aus deiner Anmeldung — es liegt kein Passwort auf dem Server. Abmelden
+        meldet alle Browser ab, nicht aber den Sammler.
       </p>
-      <div className="card pad">
-        {state?.present ? (
-          <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
-            <span className="dot sm ok" />
-            <span className="small">Sitzung aktiv</span>
-            <span className="tiny muted">zuletzt erneuert {when(state.updatedAt)}</span>
-            <span className="tiny muted">· ohne Nutzung gültig bis {when(state.deadline)}</span>
-            <button className="btn ghost small danger-hover" style={{ marginLeft: "auto" }} disabled={busy} onClick={() => void stop()}>
+      {state?.present ? (
+        <div className="status-card">
+          <Dot tone="ok" />
+          <span style={{ fontWeight: 500 }}>Sitzung aktiv</span>
+          <span className="small muted">
+            zuletzt erneuert {when(state.updatedAt)} · ohne Nutzung gültig bis {when(state.deadline)}
+          </span>
+          <span className="actions">
+            <button className="btn danger-hover" disabled={busy} onClick={() => void stop()}>
               Sammler stoppen
             </button>
-          </div>
-        ) : (
-          <div className="row" style={{ gap: 10 }}>
-            <span className="dot sm flat" />
-            <span className="small pretty">
-              Keine Sitzung hinterlegt — melde dich einmal neu an, dann läuft der Sammler wieder.
-            </span>
-          </div>
-        )}
-      </div>
-    </>
+          </span>
+        </div>
+      ) : state ? (
+        <div className="status-card">
+          <Dot tone="flat" />
+          <span className="pretty">Keine Sitzung hinterlegt — melde dich einmal neu an, dann läuft der Sammler wieder.</span>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -434,55 +747,57 @@ function RoutinesSection(props: { onError: (error: unknown) => void; onToast: (t
   }
 
   const list = routines ?? [];
+  const normalise = (id: string) =>
+    void save(list.map((x) => (x.id === id ? { ...x, ...normaliseRange(x.minMinutes, x.maxMinutes) } : x)));
   return (
-    <>
-      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Bausteine</h2>
-      <p className="small muted pretty" style={{ marginBottom: 10, maxWidth: "68ch" }}>
-        Wiederkehrende Arbeit, die nirgends eine Spur hinterlässt — Mail, Monitoring, Triage.
-        Unter jeder Lücke im Tag wird angeboten, was hineinpasst; die Dauer ist eine Spanne, aus der
-        die Lücke das Passende nimmt. Höchstens {MAX_ROUTINES} Stück.
+    <section className="section" style={{ gap: 12 }}>
+      <SectionTitle title="Bausteine" />
+      <p className="lead">
+        Wiederkehrende Arbeit, die nirgends eine Spur hinterlässt — Mail, Monitoring, Triage. Unter jeder Lücke im Tag wird
+        angeboten, was hineinpasst; die Dauer ist eine Spanne, aus der die Lücke das Passende nimmt. Höchstens{" "}
+        {MAX_ROUTINES} Stück.
       </p>
-      <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="form-card" style={{ gap: 12 }}>
         {list.map((r) => (
-          <div key={r.id} className="row" style={{ gap: 8 }}>
+          <div key={r.id} className="routine-row">
             <input
-              className="input"
+              className="input text"
               value={r.text}
               placeholder="Was wird getan?"
               onChange={(e) => patch(r.id, { text: e.target.value })}
               onBlur={() => (r.text.trim() ? void save(list) : undefined)}
-              style={{ flex: 1, minWidth: 160 }}
             />
             <input
-              className="input mono"
+              className="input minutes"
               value={String(r.minMinutes)}
               onChange={(e) => patch(r.id, { minMinutes: Number(e.target.value) || 0 })}
-              onBlur={() => void save(list.map((x) => (x.id === r.id ? { ...x, ...normaliseRange(x.minMinutes, x.maxMinutes) } : x)))}
-              style={{ width: 58 }}
+              onBlur={() => normalise(r.id)}
               title="kürzeste Dauer"
+              aria-label="kürzeste Dauer in Minuten"
             />
-            <span className="tiny muted">bis</span>
+            <span className="unit">bis</span>
             <input
-              className="input mono"
+              className="input minutes"
               value={String(r.maxMinutes)}
               onChange={(e) => patch(r.id, { maxMinutes: Number(e.target.value) || 0 })}
-              onBlur={() => void save(list.map((x) => (x.id === r.id ? { ...x, ...normaliseRange(x.minMinutes, x.maxMinutes) } : x)))}
-              style={{ width: 58 }}
+              onBlur={() => normalise(r.id)}
               title="längste Dauer"
+              aria-label="längste Dauer in Minuten"
             />
-            <span className="tiny muted">min</span>
+            <span className="unit">min</span>
             <button
-              className="btn ghost small danger-hover"
+              className="round-x"
               onClick={() => void save(list.filter((x) => x.id !== r.id))}
               title="Baustein löschen"
+              aria-label="Baustein löschen"
             >
-              ×
+              <Icon d="M18 6 6 18M6 6l12 12" size={14} stroke={2} />
             </button>
           </div>
         ))}
-        <div className="row">
+        <div className={list.length ? "divider-row" : "row wrap"} style={list.length ? undefined : { gap: 12 }}>
           <button
-            className="btn"
+            className="btn primary"
             disabled={saving || list.length >= MAX_ROUTINES}
             onClick={() =>
               // Added locally only: an empty routine has nothing to store yet.
@@ -492,22 +807,20 @@ function RoutinesSection(props: { onError: (error: unknown) => void; onToast: (t
               ])
             }
           >
-            + Baustein
+            Baustein hinzufügen
           </button>
-          {list.length === 0 ? (
-            <span className="tiny muted">Noch keiner angelegt — dann bleibt die Lückenzeile leer.</span>
-          ) : (
-            <span className="tiny muted">
-              {saving
+          <span className="small muted">
+            {list.length === 0
+              ? "Noch keiner angelegt — dann bleibt die Lückenzeile leer."
+              : saving
                 ? "speichert …"
                 : list.some((r) => !r.text.trim())
                   ? "Ein Baustein ohne Text wird nicht gespeichert."
-                  : "wird beim Verlassen des Feldes gespeichert"}
-            </span>
-          )}
+                  : `${list.length} von ${MAX_ROUTINES} · wird beim Verlassen des Feldes gespeichert`}
+          </span>
         </div>
       </div>
-    </>
+    </section>
   );
 }
 
@@ -548,35 +861,32 @@ function StyleSection(props: { onError: (error: unknown) => void; onToast: (text
   if (!style) return null;
   const examples = [...style.examples, "", "", ""].slice(0, MAX_EXAMPLES);
   return (
-    <>
-      <h2 style={{ fontSize: 15, margin: "22px 0 4px" }}>Stil der Leistungstexte</h2>
-      <p className="small muted pretty" style={{ marginBottom: 10, maxWidth: "68ch" }}>
-        Gilt für „Aus dem Verlauf entwerfen" und die Vorschläge des Tagesassistenten — nicht für
-        Mail- und Kommentarentwürfe, das ist eine andere Textsorte. Höchstens {MAX_EXAMPLES}{" "}
-        Beispiele: mehr verdrängen im Prompt das Material, um das es eigentlich geht.
+    <section className="section" style={{ gap: 12 }}>
+      <SectionTitle title="Stil der Leistungstexte" />
+      <p className="lead">
+        Gilt für „Aus dem Verlauf entwerfen" und die Vorschläge des Tagesassistenten — nicht für Mail- und
+        Kommentarentwürfe, das ist eine andere Textsorte. Höchstens {MAX_EXAMPLES} Beispiele: mehr verdrängen im Prompt das
+        Material, um das es eigentlich geht.
       </p>
-      <div className="card pad" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="form-card">
         <label className="field">
-          <span className="small muted">Regeln</span>
+          <span>Regeln</span>
           <textarea
             className="textarea"
             rows={4}
             value={style.rules}
             onChange={(e) => setStyle({ ...style, rules: e.target.value })}
             onBlur={() => void save(style)}
+            style={{ lineHeight: "22px" }}
           />
           {style.rules.trim() !== DEFAULT_STYLE_RULES ? (
-            <button
-              className="btn ghost small"
-              style={{ alignSelf: "flex-start" }}
-              onClick={() => void save({ ...style, rules: DEFAULT_STYLE_RULES })}
-            >
-              auf Standard zurücksetzen
+            <button className="linkish" style={{ alignSelf: "flex-start", fontSize: 13 }} onClick={() => void save({ ...style, rules: DEFAULT_STYLE_RULES })}>
+              Auf Standard zurücksetzen
             </button>
           ) : null}
         </label>
-        <div className="field">
-          <span className="small muted">Eigene Musterbeispiele</span>
+        <div className="field" style={{ gap: 8 }}>
+          <span>Eigene Musterbeispiele</span>
           {examples.map((example, i) => (
             <input
               key={i}
@@ -589,14 +899,13 @@ function StyleSection(props: { onError: (error: unknown) => void; onToast: (text
                 setStyle({ ...style, examples: next });
               }}
               onBlur={() => void save({ ...style, examples: style.examples.filter((x) => x.trim()) })}
-              style={{ marginBottom: 5 }}
             />
           ))}
-          <span className="tiny muted">
+          <span className="form-help">
             {saving ? "speichert …" : "In den Zeiten kannst du einen gebuchten Text mit „als Beispiel“ hierher übernehmen."}
           </span>
         </div>
       </div>
-    </>
+    </section>
   );
 }
