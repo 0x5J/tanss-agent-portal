@@ -344,7 +344,10 @@ button.search:hover { background: var(--soft2); }
 .palette-item:hover, .palette-item.active { background: var(--soft); }
 .palette-item .hint { margin-left: auto; font-size: 12px; color: var(--mute); }
 .toast {
-  position: fixed; left: 268px; bottom: 28px; z-index: 70; display: flex; align-items: center; gap: 12px;
+  position: fixed; left: 268px; bottom: 28px; z-index: 70; display: flex; gap: 12px;
+  /* "safe": a message taller than the box starts at the top, where scrolling can reach it;
+     plain centring would push its first lines out of reach. flex-start for browsers without it. */
+  align-items: flex-start; align-items: safe center;
   /* A pill for one line; a long message (an error from the model) keeps its corners and scrolls. */
   border-radius: 20px; background: var(--primary); color: var(--on-primary);
   box-shadow: var(--shadow); padding: 10px 18px; font-size: 14px; line-height: 20px;
