@@ -248,6 +248,21 @@ describe("start/stop", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("checks 10 s after start and then every hour by default", async () => {
+    vi.useFakeTimers();
+    const { source, calls } = fakeSource(release("0.2.0"));
+    const svc = service({ source });
+    svc.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(calls.length).toBe(1);
+    // The hourly timer runs from start(), not from the first check.
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 - 10_000 - 1);
+    expect(calls.length).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls.length).toBe(2);
+    svc.stop();
+  });
+
   it("stop before the first check cancels it", async () => {
     vi.useFakeTimers();
     const { source, calls } = fakeSource(release("0.2.0"));
