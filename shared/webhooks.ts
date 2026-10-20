@@ -56,6 +56,7 @@ export type Delivery = {
 
 export const MAX_WEBHOOKS = 50;
 export const MAX_FINISHED_DELIVERIES = 200;
+export const MAX_TEMPLATE_LENGTH = 20_000;
 export const DEFAULT_TEMPLATE = "{{json}}";
 
 export function newId(): string {
@@ -74,7 +75,7 @@ const posInt = (v: unknown): number => {
 const records = (raw: unknown): Record<string, unknown>[] =>
   Array.isArray(raw) ? raw.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null) : [];
 
-function isHttpUrl(url: string): boolean {
+export function isHttpUrl(url: string): boolean {
   try {
     const u = new URL(url);
     return u.protocol === "http:" || u.protocol === "https:";
@@ -98,7 +99,7 @@ export function parseWebhooks(raw: unknown): Webhook[] {
       url,
       trigger: "status",
       statusFilter: [...new Set(filter)],
-      template: typeof r.template === "string" && r.template.trim() ? r.template.slice(0, 5000) : DEFAULT_TEMPLATE,
+      template: typeof r.template === "string" && r.template.trim() ? r.template.slice(0, MAX_TEMPLATE_LENGTH) : DEFAULT_TEMPLATE,
       secret: str(r.secret, 200),
       active: r.active !== false,
     });

@@ -137,6 +137,14 @@ describe("webhook storage in the file store", () => {
     });
   });
 
+  it("keeps a long template unchanged across a restart", () => {
+    withDir((dir) => {
+      const template = `{"text":"${"a".repeat(19_000)}"}`;
+      createFileStore(dir).setWebhooks(7, [hook({ template })]);
+      expect(createFileStore(dir).webhooks(7)[0]!.template).toBe(template);
+    });
+  });
+
   it("writes webhooks.json with mode 600, since it holds secrets", () => {
     withDir((dir) => {
       createFileStore(dir).setWebhooks(7, [hook()]);

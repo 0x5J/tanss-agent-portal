@@ -3,9 +3,11 @@ import {
   DEFAULT_TEMPLATE,
   deriveCause,
   MAX_FINISHED_DELIVERIES,
+  MAX_TEMPLATE_LENGTH,
   MAX_WEBHOOKS,
   matchesFilter,
   newId,
+  isHttpUrl,
   parseDeliveries,
   parseLinks,
   parseWebhooks,
@@ -55,6 +57,13 @@ describe("parseWebhooks", () => {
     expect(w.statusFilter).toEqual([]);
     expect(w.secret).toBe("");
     expect(parseWebhooks([{ id: "a", name: "x", url: "http://h", active: false }])[0].active).toBe(false);
+  });
+  it("keeps a template up to MAX_TEMPLATE_LENGTH and cuts beyond it", () => {
+    expect(MAX_TEMPLATE_LENGTH).toBe(20_000);
+    const long = "x".repeat(19_000);
+    expect(parseWebhooks([{ id: "a", name: "x", url: "http://h", template: long }])[0].template).toBe(long);
+    const over = "x".repeat(MAX_TEMPLATE_LENGTH + 1);
+    expect(parseWebhooks([{ id: "a", name: "x", url: "http://h", template: over }])[0].template).toHaveLength(MAX_TEMPLATE_LENGTH);
   });
   it("assigns an id when missing and survives garbage", () => {
     expect(parseWebhooks("nope")).toEqual([]);
@@ -229,5 +238,14 @@ describe("cause, template and sample", () => {
     expect(() => renderTemplate("{{nope}}", samplePayload({ id: "w", name: "n" }))).toThrow(
       "Unbekannter Platzhalter: {{nope}}",
     );
+  });
+});
+
+describe("isHttpUrl", () => {
+  it("accepts http and https only", () => {
+    expect(isHttpUrl("http://h.local/a")).toBe(true);
+    expect(isHttpUrl("https://h.local/a")).toBe(true);
+    expect(isHttpUrl("ftp://h.local")).toBe(false);
+    expect(isHttpUrl("kein url")).toBe(false);
   });
 });

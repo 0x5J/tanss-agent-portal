@@ -7,7 +7,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
   DEFAULT_TEMPLATE,
+  MAX_TEMPLATE_LENGTH,
   MAX_WEBHOOKS,
+  isHttpUrl,
   newId,
   templateError,
   toPublic,
@@ -16,7 +18,7 @@ import {
   type WebhookLink,
 } from "../shared/webhooks.ts";
 import type { Store } from "./store.ts";
-import type { TanssSession } from "./tanss.ts";
+import { TanssError, type TanssSession } from "./tanss.ts";
 import type { WebhookWatcher } from "./webhook-watcher.ts";
 
 export type WebhookRouteDeps = {
@@ -27,20 +29,11 @@ export type WebhookRouteDeps = {
   now: () => number;
 };
 
-const isHttpUrl = (value: string): boolean => {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
 const webhookSchema = z.object({
   name: z.string().trim().min(1).max(80),
   url: z.string().trim().max(2000).refine(isHttpUrl),
-  statusFilter: z.array(z.number().int().positive()).max(50).default([]),
-  template: z.string().max(20_000).optional(),
+  statusFilter: z.array(z.number().int().positive()).max(50).optional(),
+  template: z.string().max(MAX_TEMPLATE_LENGTH).optional(),
   secret: z.string().max(200).optional(),
   active: z.boolean().optional(),
 });
@@ -62,16 +55,18 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
   const ticketIdOf = (request: FastifyRequest) => Number(idOf(request));
   const validTicket = (id: number) => Number.isInteger(id) && id > 0;
 
-  /** The checked body, or the German reason it is refused. */
+  /**
+   * The checked body, or the German reason it is refused. Optional fields stay
+   * undefined when not sent; a blank template that is sent means "the default".
+   */
   function parseBody(body: unknown): { ok: true; data: z.infer<typeof webhookSchema> } | { ok: false; error: string } {
     const parsed = webhookSchema.safeParse(body);
     if (!parsed.success) return { ok: false, error: "Webhook ungültig" };
-    const template = parsed.data.template?.trim() ? parsed.data.template : undefined;
-    if (template !== undefined) {
-      const error = templateError(template);
-      if (error) return { ok: false, error };
-    }
-    return { ok: true, data: { ...parsed.data, template: template ?? DEFAULT_TEMPLATE } };
+    if (parsed.data.template === undefined) return { ok: true, data: parsed.data };
+    const template = parsed.data.template.trim() ? parsed.data.template : DEFAULT_TEMPLATE;
+    const error = templateError(template);
+    if (error) return { ok: false, error };
+    return { ok: true, data: { ...parsed.data, template } };
   }
 
   app.get("/me/webhooks", async (request, reply) => {
@@ -94,7 +89,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       name: data.name,
       url: data.url,
       trigger: "status",
-      statusFilter: [...new Set(data.statusFilter)],
+      statusFilter: [...new Set(data.statusFilter ?? [])],
       template: data.template ?? DEFAULT_TEMPLATE,
       secret: data.secret ?? "",
       active: data.active ?? true,
@@ -115,8 +110,9 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       ...existing,
       name: data.name,
       url: data.url,
-      statusFilter: [...new Set(data.statusFilter)],
-      template: data.template ?? DEFAULT_TEMPLATE,
+      // Only what was sent replaces what is stored.
+      statusFilter: data.statusFilter ? [...new Set(data.statusFilter)] : existing.statusFilter,
+      template: data.template ?? existing.template,
       // Missing keeps the stored secret, an empty string removes it.
       secret: data.secret === undefined ? existing.secret : data.secret,
       active: data.active ?? existing.active,
@@ -129,12 +125,15 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       const tickets = store.webhookLinks(employeeId).filter((l) => l.webhookId === id).map((l) => l.ticketId);
       if (tickets.length > 0) {
         await withSession(request, reply, async (session) => {
+          baselines.clear();
           for (const ticketId of tickets) {
             try {
               const base = await watcher.baseline(session, ticketId);
               baselines.set(ticketId, { ...base, at: seconds() });
-            } catch {
-              // This link stays as it was.
+            } catch (error) {
+              // A dead session is for withSession to heal (or to report); nothing is saved then.
+              if (error instanceof TanssError && error.status === 401) throw error;
+              // Any other failure: this link stays as it was.
             }
           }
         });
@@ -236,9 +235,14 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
     const ticketId = ticketIdOf(request);
     if (!validTicket(ticketId)) return reply.code(400).send({ error: "Ticket ungültig" });
     const webhookId = idOf(request, "webhookId");
+    const links = store.webhookLinks(employeeId);
+    // Foreign, unknown, or not attached to this ticket: all the same to the caller.
+    if (!links.some((l) => l.webhookId === webhookId && l.ticketId === ticketId)) {
+      return reply.code(404).send({ error: NOT_FOUND });
+    }
     store.setWebhookLinks(
       employeeId,
-      store.webhookLinks(employeeId).filter((l) => !(l.webhookId === webhookId && l.ticketId === ticketId)),
+      links.filter((l) => !(l.webhookId === webhookId && l.ticketId === ticketId)),
     );
     return { ok: true };
   });

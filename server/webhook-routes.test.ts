@@ -12,13 +12,13 @@ const SESSION = { employeeId: 7, apiKey: "Bearer a", refresh: "Bearer r", expire
 
 async function setup(options: { statusOf?: (ticketId: number) => number; failTicket?: boolean } = {}) {
   let loginAs = 7;
-  const state = { statusId: 2, failTicket: options.failTicket ?? false, updates: 0 };
+  const state = { statusId: 2, failTicket: options.failTicket ?? false, failStatus: 502, updates: 0 };
   const ticketCalls: number[] = [];
   const client = {
     login: async () => ({ ...SESSION, employeeId: loginAs }),
     ticketById: async (_s: unknown, id: number) => {
       ticketCalls.push(id);
-      if (state.failTicket) throw new TanssError("Nicht erreichbar", 502);
+      if (state.failTicket) throw new TanssError("Nicht erreichbar", state.failStatus);
       return {
         item: { id, title: "Drucker", statusId: state.statusId, companyId: 5 },
         linked: {
@@ -95,6 +95,28 @@ describe("webhook routes", () => {
     expect((await call(cookie, "GET", "/me/webhooks")).json().webhooks).toEqual([]);
   });
 
+  it("keeps every omitted optional field on PUT", async () => {
+    const { login, call, store } = await setup();
+    const cookie = await login(7);
+    const template = '{"t":"{{ticket.title}}"}';
+    const id = (
+      await call(cookie, "POST", "/me/webhooks", { ...hookBody, template, statusFilter: [3, 4], active: false })
+    ).json().webhook.id as string;
+    const res = await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Neu", url: "https://hook.example/b" });
+    expect(res.statusCode).toBe(200);
+    expect(store.webhooks(7)[0]).toMatchObject({
+      name: "Neu",
+      url: "https://hook.example/b",
+      template,
+      statusFilter: [3, 4],
+      secret: "geheim",
+      active: false,
+    });
+    // fields that are sent do replace
+    await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Neu", url: "https://hook.example/b", statusFilter: [], template: "{{json}}" });
+    expect(store.webhooks(7)[0]).toMatchObject({ template: "{{json}}", statusFilter: [] });
+  });
+
   it("requires a login", async () => {
     const { app } = await setup();
     expect((await app.inject({ method: "GET", url: "/me/webhooks" })).statusCode).toBe(401);
@@ -150,6 +172,14 @@ describe("webhook routes", () => {
     expect((await call(cookie, "DELETE", `/me/tickets/42/webhooks/${id}`)).json()).toEqual({ ok: true });
     expect(store.webhookLinks(7)).toEqual([]);
 
+    // own webhook, but not attached to that ticket: 404 as well
+    const notAttached = await call(cookie, "DELETE", `/me/tickets/42/webhooks/${id}`);
+    expect(notAttached.statusCode).toBe(404);
+    expect(notAttached.json().error).toBe("Webhook nicht gefunden");
+    const missing = await call(cookie, "DELETE", "/me/tickets/42/webhooks/nope");
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json().error).toBe("Webhook nicht gefunden");
+
     const unknown = await call(cookie, "POST", "/me/tickets/42/webhooks", { webhookId: "nope", once: false });
     expect(unknown.statusCode).toBe(404);
     expect(unknown.json().error).toBe("Webhook nicht gefunden");
@@ -186,6 +216,7 @@ describe("webhook routes", () => {
       ["DELETE", `/me/webhooks/${id}`, undefined],
       ["POST", `/me/webhooks/${id}/test`, undefined],
       ["POST", "/me/tickets/42/webhooks", { webhookId: id, once: false }],
+      ["DELETE", `/me/tickets/42/webhooks/${id}`, undefined],
     ] as const) {
       const res = await call(c8, method, url, body);
       expect(res.statusCode, `${method} ${url}`).toBe(404);
@@ -286,6 +317,23 @@ describe("webhook routes", () => {
     const res = await put(true);
     expect(res.statusCode).toBe(200);
     expect(res.json().webhook.active).toBe(true);
+    expect(store.webhookLinks(7)[0]).toEqual(link);
+  });
+
+  it("passes a 401 during reactivation on and saves nothing", async () => {
+    const { login, call, state, store } = await setup();
+    const cookie = await login(7);
+    const id = (await call(cookie, "POST", "/me/webhooks", { name: "Teams", url: "https://hook.example/a" })).json().webhook.id as string;
+    await call(cookie, "POST", "/me/tickets/42/webhooks", { webhookId: id, once: false });
+    const put = (active: boolean) =>
+      call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", active });
+    await put(false);
+    const link = store.webhookLinks(7)[0]!;
+    state.failTicket = true;
+    state.failStatus = 401;
+    const res = await put(true);
+    expect(res.statusCode).toBe(401);
+    expect(store.webhooks(7)[0]!.active).toBe(false);
     expect(store.webhookLinks(7)[0]).toEqual(link);
   });
 });
