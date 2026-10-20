@@ -59,6 +59,8 @@ export function TodayView(props: Props) {
   const [rows, setRows] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activity, setActivity] = useState<Record<number, Activity>>({});
+  /** The histories are still on their way; a briefing now would miss the stale tickets. */
+  const [activityPending, setActivityPending] = useState(false);
   const [window_, setWindow] = useState<{ today: string; since: string } | null>(null);
   const [week, setWeek] = useState<Support[] | null>(null);
   const [briefing, setBriefing] = useState<Briefing | null>(() =>
@@ -76,6 +78,7 @@ export function TodayView(props: Props) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setActivityPending(false);
     api
       .tickets()
       .then((result) => {
@@ -85,6 +88,7 @@ export function TodayView(props: Props) {
         if (!ids.length) return;
         // The histories make "longest without a trace" exact; without them
         // the age stands in, so a failure here is no reason to complain.
+        setActivityPending(true);
         api
           .activity(ids)
           .then((a) => {
@@ -94,7 +98,10 @@ export function TodayView(props: Props) {
             setActivity(map);
             setWindow({ today: a.today, since: a.since });
           })
-          .catch(() => null);
+          .catch(() => null)
+          .finally(() => {
+            if (!cancelled) setActivityPending(false);
+          });
       })
       .catch((error: unknown) => {
         if (!cancelled) onError(error);
@@ -113,9 +120,10 @@ export function TodayView(props: Props) {
     };
   }, [props.reload, employeeId, onError]);
 
+  // Once loaded, an empty result is news too: it clears the board the nav badge and the sidebar read.
   useEffect(() => {
-    if (rows.length) onData(rows, activity);
-  }, [rows, activity, onData]);
+    if (!loading) onData(rows, activity);
+  }, [loading, rows, activity, onData]);
 
   const own = useMemo(() => ownOpen(rows, employeeId), [rows, employeeId]);
   const ordered = useMemo(
@@ -181,8 +189,8 @@ export function TodayView(props: Props) {
         )}
         <div className="briefing-actions">
           {!briefing && props.agentReady ? (
-            <button className="btn primary" disabled={briefingBusy || loading || own.length === 0} onClick={() => void makeBriefing(false)}>
-              {briefingBusy ? "Schreibt …" : "Briefing erstellen"}
+            <button className="btn primary" disabled={briefingBusy || loading || activityPending || own.length === 0} onClick={() => void makeBriefing(false)}>
+              {briefingBusy ? "Schreibt …" : activityPending ? "Verläufe laden …" : "Briefing erstellen"}
             </button>
           ) : null}
           <button className={`btn${briefing || !props.agentReady ? " primary" : ""}`} onClick={() => props.onView("times")}>
@@ -192,7 +200,7 @@ export function TodayView(props: Props) {
             Tickets ansehen
           </button>
           {briefing ? (
-            <button className="btn ghost" disabled={briefingBusy} onClick={() => void makeBriefing(true)} title="Verwerfen und neu schreiben">
+            <button className="btn ghost" disabled={briefingBusy || activityPending} onClick={() => void makeBriefing(true)} title="Verwerfen und neu schreiben">
               {briefingBusy ? "Schreibt …" : "Neu schreiben"}
             </button>
           ) : null}

@@ -237,9 +237,19 @@ export function TimesView(props: Props) {
       b = next === a ? a + SNAP_MINUTES : next;
       setSel({ a, b });
     };
-    const up = () => {
+    const stop = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      window.removeEventListener("keydown", abort);
+    };
+    // Escape mid-drag drops the selection; the release then opens nothing.
+    const abort = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      stop();
+      setSel(null);
+    };
+    const up = () => {
+      stop();
       let lo = Math.min(a, b);
       let hi = Math.max(a, b);
       if (!moved) {
@@ -256,6 +266,7 @@ export function TimesView(props: Props) {
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
+    window.addEventListener("keydown", abort);
   }
 
   // Only meaningful for the current day; drawn as a thin red rule.
