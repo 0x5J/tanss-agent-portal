@@ -120,7 +120,7 @@ export function SettingsView(props: Props) {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 720 }}>
+    <div className="page" style={{ maxWidth: 784 }}>
       <h2 style={{ fontSize: 15, marginBottom: 4 }}>Lokale KI</h2>
       <p className="small muted pretty" style={{ marginBottom: 14, maxWidth: "68ch" }}>
         Ein OpenAI-kompatibler Endpoint auf dem eigenen Rechner oder im eigenen Netz — oMLX, Ollama,

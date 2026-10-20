@@ -194,7 +194,7 @@ export function DashboardView(props: Props) {
   }, [selected, onSubtitle]);
 
   if (!board || !selected) {
-    return <div style={{ padding: 16 }} className="muted small">Lädt …</div>;
+    return <div className="page muted small">Lädt …</div>;
   }
 
   const key = selected.key;
@@ -209,7 +209,7 @@ export function DashboardView(props: Props) {
   const age = ageBuckets(selected.rows, today);
 
   return (
-    <div className="dash" style={{ padding: 16 }}>
+    <div className="dash">
       <div className="row" style={{ marginBottom: 14, gap: 10 }}>
         <span className="small muted">Liste</span>
         <select className="select" value={key} onChange={(e) => setListKey(e.target.value)} style={{ minWidth: 220 }}>

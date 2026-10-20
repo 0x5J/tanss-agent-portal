@@ -180,7 +180,7 @@ export function ImportView(props: Props) {
 
   if (!props.configured) {
     return (
-      <div style={{ padding: 16, maxWidth: 720 }}>
+      <div className="page" style={{ maxWidth: 784 }}>
         <div className="empty">
           <div className="title">Keine Linear-Verbindung eingerichtet.</div>
           <div className="small muted pretty" style={{ maxWidth: "68ch" }}>
@@ -195,7 +195,7 @@ export function ImportView(props: Props) {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1100 }}>
+    <div className="page" style={{ maxWidth: 1164 }}>
       <div className="card pad" style={{ marginBottom: 14 }}>
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           <input className="input mono" type="date" value={day} onChange={(e) => setDay(e.target.value)} style={{ width: 150 }} />

@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+## [0.4.0] – 2026-10-20
+
 ### Entfernt
 
 - Die Seite „Freigaben“ samt Menüpunkt, Kürzel `G F` und Zähler, dazu der
@@ -15,6 +17,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ### Geändert
 
+- Neues Erscheinungsbild nach dem Redesign-Entwurf
+  (`docs/design/Agent-Portal-Redesign.dc.html`): Schwarz-Weiß mit Schwarz als
+  einziger Aktionsfarbe, Pillen-Buttons, weiche Karten, Inter als einzige
+  Schrift. Hell ist jetzt der Standard; wer bisher dunkel hatte, behält das,
+  bis er umschaltet.
+- Navigation in Gruppen (Arbeit, Analyse, System). Unten stehen TANSS-, KI- und
+  Versionsstatus, der angemeldete Techniker sowie die Buttons für
+  Erscheinungsbild und Abmelden. Die Kürzel stehen jetzt im Tooltip.
+- Kopfzeile mit Pfad, Suche und einem Button „Agent“, der die Agent-Leiste ein-
+  und ausblendet. Die schmale Leiste am rechten Rand fällt dafür weg.
+- Agent-Leiste als Chat mit Sprechblasen, Vorschlägen als Pillen und einem
+  Eingabefeld mit Senden-Button.
+- Anmeldeseite zweigeteilt: links eine schwarze Fläche, rechts das Formular.
 - Installationsanleitung neu geschrieben: welche zwei Dateien es braucht, wie
   die `.env` ausgefüllt wird, wie man startet und prüft.
 - Die `.env`-Vorlage (`env.example`) beginnt mit den beiden Pflichtwerten;
@@ -89,7 +104,8 @@ Erste öffentliche Version.
 - Der gespeicherte LLM-API-Key geht nur noch an den gespeicherten Endpoint.
 - Abmelden macht alle Cookies des Kontos serverseitig ungültig, auch Kopien.
 
-[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.3.0...HEAD
+[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/0x5J/tanss-agent-portal/releases/tag/v0.1.0

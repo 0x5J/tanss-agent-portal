@@ -35,7 +35,7 @@ function readTheme(): Theme {
   } catch {
     /* private mode */
   }
-  return "dark";
+  return "light";
 }
 
 export function App() {
@@ -60,6 +60,8 @@ export function App() {
   const onBoardData = useCallback((rows: TicketRow[], activity: Record<number, Activity>) => setBoard({ rows, activity }), []);
 
   useEffect(() => {
+    // The ticket drawer is fixed to the viewport; this keeps it left of the open agent column.
+    document.documentElement.dataset.agent = sidebar ? "open" : "closed";
     try {
       localStorage.setItem("agent-portal:sidebar", sidebar ? "open" : "closed");
     } catch {
@@ -206,8 +208,11 @@ export function App() {
       }
       if (typing || paletteOpen || openTicket) return;
       if (event.key === "/") {
+        // Only the tickets view has a search field; elsewhere the key stays the browser's.
+        const search = document.getElementById("board-search");
+        if (!search) return;
         event.preventDefault();
-        document.getElementById("board-search")?.focus();
+        search.focus();
         return;
       }
       if (chord.current) {
@@ -237,7 +242,7 @@ export function App() {
   }, [employeeId, paletteOpen, openTicket]);
 
   if (checking || !config) {
-    return <main className="login"><p className="muted">Verbinde …</p></main>;
+    return <main className="login center"><p className="muted">Verbinde …</p></main>;
   }
   if (!employeeId) {
     return (
@@ -266,11 +271,15 @@ export function App() {
         onStartUpdate={(version) =>
           void confirmAndStartUpdate(version, { onOverview: updates.replace, onToast: showToast, onError: report })
         }
+        userName={meta?.technicians.find((t) => t.id === employeeId)?.name ?? ""}
+        employeeId={employeeId}
         subtitle={subtitle}
         query={query}
         onQuery={setQuery}
         showSearch={view === "tickets"}
         onPalette={() => setPaletteOpen(true)}
+        agentOpen={sidebar}
+        onToggleAgent={() => setSidebar((o) => !o)}
         onLogout={handleLogout}
         side={
           <AgentSidebar
@@ -292,7 +301,7 @@ export function App() {
           <>
             {tanssDown ? (
               <div className="banner">
-                <span className="dot sm warn" />
+                <span className="dot warn" />
                 <span>TANSS-API antwortet nicht: {tanssDown}</span>
                 <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setTanssDown(null)}>
                   Ausblenden
@@ -414,7 +423,6 @@ export function App() {
 
       {toast ? (
         <div className="toast" role="status">
-          <span className="dot xs ok" />
           <span>{toast}</span>
         </div>
       ) : null}
