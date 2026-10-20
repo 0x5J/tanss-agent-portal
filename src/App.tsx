@@ -60,6 +60,8 @@ export function App() {
   const onBoardData = useCallback((rows: TicketRow[], activity: Record<number, Activity>) => setBoard({ rows, activity }), []);
 
   useEffect(() => {
+    // The ticket drawer is fixed to the viewport; this keeps it left of the open agent column.
+    document.documentElement.dataset.agent = sidebar ? "open" : "closed";
     try {
       localStorage.setItem("agent-portal:sidebar", sidebar ? "open" : "closed");
     } catch {
@@ -206,8 +208,11 @@ export function App() {
       }
       if (typing || paletteOpen || openTicket) return;
       if (event.key === "/") {
+        // Only the tickets view has a search field; elsewhere the key stays the browser's.
+        const search = document.getElementById("board-search");
+        if (!search) return;
         event.preventDefault();
-        document.getElementById("board-search")?.focus();
+        search.focus();
         return;
       }
       if (chord.current) {

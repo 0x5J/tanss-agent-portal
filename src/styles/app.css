@@ -328,9 +328,14 @@ button.search:hover { background: var(--soft2); }
 .selection-bar .kbd { color: inherit; opacity: 0.6; }
 
 /* ---- drawer --------------------------------------------------------------- */
-.backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 50; }
+/* Drawer and backdrop stop at the agent column, so the chat stays usable with a ticket open. */
+:root { --agent-w: 0px; }
+:root[data-agent="open"] { --agent-w: 380px; }
+@media (max-width: 1180px) { :root[data-agent="open"] { --agent-w: 320px; } }
+.backdrop { position: fixed; top: 0; bottom: 0; left: 0; right: var(--agent-w); background: var(--scrim); z-index: 50; }
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(920px, 88vw); background: var(--bg);
+  position: fixed; top: 0; right: var(--agent-w); bottom: 0; background: var(--bg);
+  width: min(920px, calc(100vw - 260px - var(--agent-w))); min-width: min(520px, 100vw);
   border-left: 1px solid var(--line); box-shadow: var(--shadow); z-index: 51;
   display: flex; flex-direction: column;
 }
