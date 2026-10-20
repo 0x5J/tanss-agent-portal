@@ -238,7 +238,33 @@ button.search:hover { background: var(--soft2); }
 }
 .input:focus, .textarea:focus, .select:focus { border-bottom-color: var(--ink); }
 .select { cursor: pointer; }
-.textarea { resize: vertical; min-height: 64px; }
+.textarea { resize: vertical; min-height: 84px; }
+
+/*
+ * Long texts, mostly from the agent. A text field grows with what is in it up
+ * to a limit and then scrolls (`field-sizing` where the browser has it;
+ * elsewhere the rows stay and the field scrolls as before).
+ */
+.textarea, .td-reply-text { field-sizing: content; max-height: 50vh; overflow-y: auto; }
+/*
+ * Boxes that scroll get a drawn scrollbar, not the overlay kind macOS hides:
+ * a text that looks cut off must show that there is more. Chromium and Safari
+ * take the -webkit rules (setting scrollbar-width would switch them off);
+ * Firefox takes the standard ones.
+ */
+.textarea::-webkit-scrollbar, .td-reply-text::-webkit-scrollbar, .toast::-webkit-scrollbar, .palette::-webkit-scrollbar { width: 10px; height: 10px; }
+.textarea::-webkit-scrollbar-thumb, .td-reply-text::-webkit-scrollbar-thumb, .toast::-webkit-scrollbar-thumb, .palette::-webkit-scrollbar-thumb {
+  background: var(--mute); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box;
+}
+.textarea::-webkit-scrollbar-track, .td-reply-text::-webkit-scrollbar-track, .toast::-webkit-scrollbar-track, .palette::-webkit-scrollbar-track { background: transparent; }
+@supports not selector(::-webkit-scrollbar) {
+  .textarea, .td-reply-text, .toast, .palette { scrollbar-width: thin; scrollbar-color: var(--mute) transparent; }
+}
+/* A word longer than its box — a URL in a draft or a summary — wraps instead of running out of it. */
+.chat-msg .bubble, .td-short, .td-insight-body, .tk-answer-body, .tk-group,
+.briefing-text, .sugg, .sugg-empty, .sugg-note, .toast span, .form-foot .result, .status-card .result {
+  overflow-wrap: anywhere;
+}
 .input.mono { font-variant-numeric: tabular-nums; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > label { font-size: 13px; font-weight: 500; color: var(--ink); }
@@ -303,7 +329,11 @@ button.search:hover { background: var(--soft2); }
 
 /* ---- palette, toast ------------------------------------------------------- */
 .palette-backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding-top: 14vh; }
-.palette { width: min(620px, 92vw); border-radius: 16px; background: var(--bg); box-shadow: var(--shadow); overflow: hidden; padding-bottom: 8px; }
+.palette {
+  width: min(620px, 92vw); border-radius: 16px; background: var(--bg); box-shadow: var(--shadow); padding-bottom: 8px;
+  /* A dialog taller than the screen (a long comment) scrolls instead of losing its buttons below the edge. */
+  max-height: calc(86vh - 24px); overflow: auto;
+}
 .palette-input { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .palette-input input { flex: 1; background: transparent; border: 0; outline: 0; font-size: 16px; }
 .palette-group { padding: 12px 20px 4px; font-size: 12px; color: var(--body); }
@@ -314,9 +344,14 @@ button.search:hover { background: var(--soft2); }
 .palette-item:hover, .palette-item.active { background: var(--soft); }
 .palette-item .hint { margin-left: auto; font-size: 12px; color: var(--mute); }
 .toast {
-  position: fixed; left: 268px; bottom: 28px; z-index: 70; display: flex; align-items: center; gap: 12px;
-  border-radius: 999px; background: var(--primary); color: var(--on-primary);
-  box-shadow: var(--shadow); padding: 10px 18px; font-size: 14px;
+  position: fixed; left: 268px; bottom: 28px; z-index: 70; display: flex; gap: 12px;
+  /* "safe": a message taller than the box starts at the top, where scrolling can reach it;
+     plain centring would push its first lines out of reach. flex-start for browsers without it. */
+  align-items: flex-start; align-items: safe center;
+  /* A pill for one line; a long message (an error from the model) keeps its corners and scrolls. */
+  border-radius: 20px; background: var(--primary); color: var(--on-primary);
+  box-shadow: var(--shadow); padding: 10px 18px; font-size: 14px; line-height: 20px;
+  max-width: min(720px, calc(100vw - 300px)); max-height: 40vh; overflow-y: auto;
 }
 
 /* ---- login ---------------------------------------------------------------- */

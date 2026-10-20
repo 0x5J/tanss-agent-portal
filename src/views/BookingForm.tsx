@@ -305,7 +305,7 @@ export function BookingForm(props: Props) {
             </button>
           ) : null}
         </div>
-        <textarea className="textarea" rows={props.compact || props.floating ? 2 : 4} value={text} onChange={(e) => setText(e.target.value)} />
+        <textarea className="textarea" rows={props.compact || props.floating ? 3 : 4} value={text} onChange={(e) => setText(e.target.value)} />
         {initial.supportId && text.trim() ? (
           <button
             className="btn ghost small"

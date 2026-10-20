@@ -6,6 +6,21 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Lange Texte, vor allem vom Agenten, bleiben lesbar:
+  - Textfelder wachsen mit ihrem Inhalt bis zur halben Fensterhöhe und
+    scrollen dann, mit einem sichtbaren Scrollbalken auch auf dem Mac.
+  - Lange Wörter und URLs brechen in Chat, Zusammenfassungen, Briefings und
+    Vorschlägen um, statt aus ihrem Kasten zu laufen.
+  - Hinweise am unteren Rand scrollen bei langen Fehlermeldungen und bleiben
+    länger stehen.
+  - Der Dialog für einen gemeinsamen Kommentar scrollt, statt seine Buttons
+    unter den Bildschirmrand zu schieben.
+  - „Nächster Schritt“ und die Vorschläge in „Zeiten“ behalten die
+    Zeilenumbrüche des Agenten; ein gekürzter Firmenname zeigt den vollen Namen
+    beim Darüberfahren.
+
 ## [0.4.3] – 2026-10-20
 
 ### Hinzugefügt

@@ -78,7 +78,7 @@ export function TicketAgentActions(props: Props) {
 
           {next ? (
             <Insight tone="ink" title={`Nächster Schritt${next.owner ? ` · am Zug: ${next.owner}` : ""}`} onClose={() => setNext(null)}>
-              {next.text}
+              <span className="pre">{next.text}</span>
               {next.statusName && next.statusId && !next.unchanged ? (
                 <div className="td-insight-action">
                   <span className="tiny muted">Status passt nicht mehr ({next.currentStatus || "—"})</span>
