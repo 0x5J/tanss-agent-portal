@@ -6,6 +6,18 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Updates prüfen die Herkunft: Jede Version ab 0.5.0 trägt einen signierten
+  Nachweis, dass Portal- und Updater-Image aus dem Release-Workflow dieses
+  Repos stammen. Der Updater installiert nur Images mit gültigem Nachweis und
+  bricht sonst ab, ohne das laufende Portal anzufassen.
+
+### Wichtig beim Update
+
+- Der Updater aktualisiert sich nicht selbst: Für die Prüfung einmal im
+  Installationsordner `docker compose pull && docker compose up -d` ausführen.
+
 ## [0.4.4] – 2026-10-20
 
 ### Behoben
