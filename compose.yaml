@@ -32,9 +32,10 @@ services:
   updater:
     image: ghcr.io/0x5j/tanss-agent-portal-updater:${PORTAL_TAG:-latest}
     restart: unless-stopped
-    # Ein laufendes Update darf zu Ende laufen (Stopp 30 s + Pruefung 90 s);
-    # wird es trotzdem abgebrochen, raeumt der Updater beim naechsten Start auf.
-    stop_grace_period: 2m
+    # Ein laufendes Update darf zu Ende laufen (Herkunftspruefung, Stopp 30 s
+    # + Pruefung 90 s); wird es trotzdem abgebrochen, raeumt der Updater beim
+    # naechsten Start auf.
+    stop_grace_period: 4m
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/update:/update
