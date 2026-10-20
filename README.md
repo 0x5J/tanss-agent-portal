@@ -180,10 +180,12 @@ wieder und nennt den Grund im Banner. Dafür braucht er ausgehenden Zugriff auf
   Version weiter.
 - `UPDATE_CHECK=0` schaltet die Abfrage bei GitHub ab (kein Banner).
 - `UPDATE_CHANNEL=staging` zeigt auch Pre-Releases an (siehe Staging).
-- `PORTAL_SOURCE` (GitHub-Repo als `owner/name`, Standard
-  `0x5J/tanss-agent-portal`) ist nur für Forks gedacht, die eigene Images
-  veröffentlichen: Die Herkunftsprüfung erwartet den Nachweis dann von diesem
-  Repo.
+- Nur für Forks, die eigene Images veröffentlichen: In der eigenen
+  `compose.yaml` (nicht in der `.env`, die der Updater nicht liest) beim Dienst
+  `updater` unter `environment` setzen: `PORTAL_REPO` (das eigene Image,
+  Standard `ghcr.io/0x5j/tanss-agent-portal`) und `PORTAL_SOURCE` (das eigene
+  GitHub-Repo als `owner/name`, Standard `0x5J/tanss-agent-portal`). Die
+  Herkunftsprüfung erwartet den Nachweis dann von diesem Repo.
 
 ### Herkunft selbst prüfen
 
