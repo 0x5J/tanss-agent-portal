@@ -73,6 +73,10 @@ function fakeDocker(
     oldRunning?: boolean;
     newRunning?: boolean;
     newManifests?: ImageInfo["Manifests"];
+    /** What the pull stream reports as digest; null means it reported none. */
+    pullDigest?: string | null;
+    /** RepoDigests of the pulled image. */
+    newRepoDigests?: string[];
   } = {},
 ) {
   const calls: Call[] = [];
@@ -109,11 +113,12 @@ function fakeDocker(
       if (o) record("inspectImage", ref, o);
       else record("inspectImage", ref);
       if (ref === old.Image) return image("sha256:old-image");
-      return o?.manifests ? { ...image(NEW_IMAGE_ID), Manifests: opts.newManifests ?? [] } : image(NEW_IMAGE_ID);
+      const fresh = { ...image(NEW_IMAGE_ID), RepoDigests: opts.newRepoDigests };
+      return o?.manifests ? { ...fresh, Manifests: opts.newManifests ?? [] } : fresh;
     },
     async pullImage(repo, tag) {
       record("pullImage", repo, tag);
-      return NEW_DIGEST;
+      return opts.pullDigest === undefined ? NEW_DIGEST : opts.pullDigest;
     },
     async removeImage(ref) {
       record("removeImage", ref);
@@ -151,6 +156,7 @@ function setup(
     docker?: ReturnType<typeof fakeDocker>;
     health?: (url: string) => string | null;
     findPortal?: () => Promise<string>;
+    verifyImage?: (digest: string, version: string) => Promise<void>;
     healthTimeoutMs?: number;
   } = {},
 ) {
@@ -165,6 +171,7 @@ function setup(
     docker: fake.docker,
     repo: REPO,
     findPortal: opts.findPortal ?? (async () => OLD_ID),
+    verifyImage: opts.verifyImage ?? (async () => {}),
     async health(url: string) {
       healthUrls.push(url);
       return health(url);
@@ -212,7 +219,7 @@ describe("runUpdate", () => {
       `tagImage(${REPO}:0.2.0, ${REPO}, latest)`,
     ]);
     expect(t.healthUrls).toEqual([`http://${OLD_IP}:3848/health`, `http://${NEW_IP}:3848/health`]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "done"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "done"]);
     expect(result).toBe(t.reports.at(-1));
     expect(result).toEqual({
       id: "req-1",
@@ -398,6 +405,104 @@ describe("runUpdate", () => {
     expect(t.calls).toEqual([]);
   });
 
+  describe("provenance", () => {
+    const FAILED = `Herkunft von ${REPO}:0.2.0 nicht bestätigt: kein Herkunftsnachweis bei GitHub gefunden — Update abgebrochen`;
+    const rejecting = async () => {
+      throw new Error("kein Herkunftsnachweis bei GitHub gefunden");
+    };
+
+    it("checks the provenance of the pulled digest before stopping anything", async () => {
+      const fake = fakeDocker();
+      const verified: { digest: string; version: string; before: string[] }[] = [];
+      const t = setup({
+        docker: fake,
+        async verifyImage(digest, version) {
+          verified.push({ digest, version, before: mutating(fake.calls) });
+        },
+      });
+      await runUpdate(t.deps, REQUEST);
+
+      expect(verified).toEqual([{ digest: NEW_DIGEST, version: "0.2.0", before: [`pullImage(${REPO}, 0.2.0)`] }]);
+      expect(t.reports.map((r) => [r.state, r.message]).slice(0, 2)).toEqual([
+        ["pulling", "Image wird geladen"],
+        ["pulling", "Herkunft wird geprüft"],
+      ]);
+    });
+
+    it("falls back to RepoDigests without a digest in the pull stream", async () => {
+      const verified: string[] = [];
+      const t = setup({
+        docker: fakeDocker({
+          pullDigest: null,
+          newRepoDigests: [`other/repo@sha256:${"c".repeat(64)}`, `${REPO}@${NEW_DIGEST}`],
+        }),
+        async verifyImage(digest) {
+          verified.push(digest);
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+      expect(verified).toEqual([NEW_DIGEST]);
+      expect(result.state).toBe("done");
+    });
+
+    it("accepts the same digest listed twice in RepoDigests", async () => {
+      const verified: string[] = [];
+      const t = setup({
+        docker: fakeDocker({ pullDigest: null, newRepoDigests: [`${REPO}@${NEW_DIGEST}`, `${REPO}@${NEW_DIGEST}`] }),
+        async verifyImage(digest) {
+          verified.push(digest);
+        },
+      });
+      await runUpdate(t.deps, REQUEST);
+      expect(verified).toEqual([NEW_DIGEST]);
+    });
+
+    it.each([
+      ["two different digests", [`${REPO}@${NEW_DIGEST}`, `${REPO}@sha256:${"c".repeat(64)}`]],
+      ["no digest of the repository", [`other/repo@${NEW_DIGEST}`]],
+      ["no RepoDigests", undefined],
+      ["a malformed digest", [`${REPO}@sha256:${"B".repeat(64)}`]],
+    ])("fails without a unique digest (%s)", async (_label, newRepoDigests) => {
+      let verifies = 0;
+      const t = setup({
+        docker: fakeDocker({ pullDigest: null, newRepoDigests }),
+        async verifyImage() {
+          verifies += 1;
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result.state).toBe("failed");
+      expect(result.message).toBe(`Image ${REPO}:0.2.0 ohne eindeutigen Digest — Update abgebrochen`);
+      expect(verifies).toBe(0);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`]);
+    });
+
+    it("aborts the update when the provenance check fails", async () => {
+      const t = setup({ verifyImage: rejecting });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({ state: "failed", message: FAILED });
+      expect(t.reports.at(-1)).toBe(result);
+      const methods = t.calls.map(([m]) => m);
+      for (const m of ["stopContainer", "renameContainer", "createContainer"] as const) {
+        expect(methods).not.toContain(m);
+      }
+    });
+
+    it("removes the pulled image when the provenance check fails", async () => {
+      const t = setup({ verifyImage: rejecting });
+      await runUpdate(t.deps, REQUEST);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("stays failed when removing the rejected image fails", async () => {
+      const t = setup({ docker: fakeDocker({ fail: { removeImage: "image is in use" } }), verifyImage: rejecting });
+      const result = await runUpdate(t.deps, REQUEST);
+      expect(result).toMatchObject({ state: "failed", message: FAILED });
+    });
+  });
+
   it("fails without stopping anything when the pull fails", async () => {
     const t = setup({ docker: fakeDocker({ fail: { pullImage: "manifest unknown" } }) });
     const result = await runUpdate(t.deps, REQUEST);
@@ -424,7 +529,7 @@ describe("runUpdate", () => {
       `renameContainer(${OLD_ID}, ${NAME})`,
       `startContainer(${OLD_ID})`,
     ]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "rolledBack"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "rolledBack"]);
     // Polled every 2 s for the default 90 s.
     expect(new Set(t.sleeps)).toEqual(new Set([2000]));
     expect(t.elapsed()).toBeGreaterThanOrEqual(90_000);
@@ -490,7 +595,7 @@ describe("runUpdate", () => {
       `renameContainer(${OLD_ID}, ${NAME})`,
       `startContainer(${OLD_ID})`,
     ]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "rolledBack"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "rolledBack"]);
   });
 
   it("rolls back when connecting an extra network fails", async () => {
@@ -652,7 +757,7 @@ describe("runUpdate", () => {
     expect(result.message).toMatch(/^Update auf 0\.2\.0 abgeschlossen/);
     expect(result.message).toContain("no space left");
     expect(names(t.calls)).not.toContain(`startContainer(${OLD_ID})`);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "done"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "done"]);
   });
 
   it("does not retag a digest reference", async () => {

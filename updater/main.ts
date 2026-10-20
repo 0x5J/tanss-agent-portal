@@ -5,6 +5,7 @@ import os from "node:os";
 import { STATUS_FILE, type UpdateStatus } from "../shared/update.ts";
 import { createDockerApi } from "./docker.ts";
 import { checkUpdateDir, createLoop, readStatus, writeJsonAtomic } from "./loop.ts";
+import { createImageVerifier } from "./provenance.ts";
 import { findPortalContainer, recoverInterrupted, runUpdate } from "./update.ts";
 
 const TICK_MS = 5_000;
@@ -13,6 +14,7 @@ const HEALTH_FETCH_TIMEOUT_MS = 3_000;
 
 const dir = process.env.UPDATE_DIR || "/update";
 const repo = process.env.PORTAL_REPO || "ghcr.io/0x5j/tanss-agent-portal";
+const source = process.env.PORTAL_SOURCE || "0x5J/tanss-agent-portal";
 const version = process.env.UPDATER_VERSION || "dev";
 const selfId = os.hostname();
 
@@ -60,6 +62,7 @@ function adoptDir(): boolean {
 }
 
 const docker = createDockerApi();
+const verifyImage = createImageVerifier({ source });
 let lastState = "";
 
 /** Set once adoptDir() accepted the folder; nothing is written into it before. */
@@ -102,6 +105,7 @@ const loop = createLoop({
         docker,
         repo,
         findPortal: () => findPortalContainer(docker, selfId),
+        verifyImage,
         health,
         report,
         now: () => Date.now(),
@@ -160,7 +164,7 @@ function serve(): void {
     storeStatus(pendingStatus);
     pendingStatus = null;
   }
-  log(`Updater ${version} bereit, Portal-Image ${repo}`);
+  log(`Updater ${version} bereit, Portal-Image ${repo}, Herkunft ${source}`);
   tick();
   timer = setInterval(tick, TICK_MS);
 }
