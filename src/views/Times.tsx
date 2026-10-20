@@ -502,7 +502,7 @@ export function TimesView(props: Props) {
                 <div key={index} className="sugg">
                   <div className="sugg-top">
                     <span className="kind">{KIND_LABEL[idea.kind] ?? idea.kind}</span>
-                    {idea.company ? <span className="ellipsis">{idea.company}</span> : null}
+                    {idea.company ? <span className="ellipsis" title={idea.company}>{idea.company}</span> : null}
                     <span>{idea.documented ? "belegt" : "ohne Beleg"}</span>
                     <span className="span">
                       {idea.startMinute !== null

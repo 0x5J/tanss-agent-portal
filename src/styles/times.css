@@ -116,7 +116,7 @@
 .sugg-top { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--body); min-width: 0; }
 .sugg-top .kind { color: var(--ink); font-weight: 500; }
 .sugg-top .span { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sugg-text { font-size: 16px; line-height: 24px; text-wrap: pretty; }
+.sugg-text { font-size: 16px; line-height: 24px; text-wrap: pretty; white-space: pre-line; }
 .sugg-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sugg-actions .buttons { margin-left: auto; display: flex; gap: 8px; }
 .sugg-min { display: inline-flex; align-items: center; background: var(--bg); border-radius: 999px; padding: 0 4px 0 12px; }

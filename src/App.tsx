@@ -140,7 +140,8 @@ export function App() {
   const showToast = useCallback((text: string) => {
     setToastText(text);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastText(null), 4000);
+    // Long enough to read: a long message (an error from the model) stays longer, up to 15 s.
+    toastTimer.current = window.setTimeout(() => setToastText(null), Math.min(15_000, Math.max(4000, text.length * 60)));
   }, []);
 
   /** Every failed call lands here, so a lost session logs out everywhere. */
