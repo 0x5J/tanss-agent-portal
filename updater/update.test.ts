@@ -77,11 +77,14 @@ function fakeDocker(
     pullDigest?: string | null;
     /** RepoDigests of the pulled image. */
     newRepoDigests?: string[];
+    /** Ids the pulled image reports, one per inspect; the last one repeats. */
+    newImageIds?: string[];
   } = {},
 ) {
   const calls: Call[] = [];
   const old = opts.old ?? oldContainer();
   const newIps = [...(opts.newIps ?? [NEW_IP])];
+  const newImageIds = [...(opts.newImageIds ?? [NEW_IMAGE_ID])];
   let oldName = old.Name;
 
   function record(method: Method, ...args: unknown[]) {
@@ -113,7 +116,8 @@ function fakeDocker(
       if (o) record("inspectImage", ref, o);
       else record("inspectImage", ref);
       if (ref === old.Image) return image("sha256:old-image");
-      const fresh = { ...image(NEW_IMAGE_ID), RepoDigests: opts.newRepoDigests };
+      const id = newImageIds.length > 1 ? newImageIds.shift()! : newImageIds[0]!;
+      const fresh = { ...image(id), RepoDigests: opts.newRepoDigests };
       return o?.manifests ? { ...fresh, Manifests: opts.newManifests ?? [] } : fresh;
     },
     async pullImage(repo, tag) {
@@ -246,7 +250,10 @@ describe("runUpdate", () => {
     // Ruling J: compose's image label follows the new image id.
     expect(body.Labels["com.docker.compose.image"]).toBe(NEW_IMAGE_ID);
     expect(body.Labels["com.docker.compose.project"]).toBe("agent-portal");
-    expect(t.calls).toContainEqual(["inspectImage", `${REPO}:0.2.0`]);
+    expect(t.calls.find(([m, ref]) => m === "inspectImage" && ref === `${REPO}:0.2.0`)).toEqual([
+      "inspectImage",
+      `${REPO}:0.2.0`,
+    ]);
   });
 
   it("sets the compose image label to the new platform manifest on the containerd store", async () => {
@@ -475,7 +482,48 @@ describe("runUpdate", () => {
       expect(result.state).toBe("failed");
       expect(result.message).toBe(`Image ${REPO}:0.2.0 ohne eindeutigen Digest — Update abgebrochen`);
       expect(verifies).toBe(0);
-      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`]);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("removes the pulled image when it cannot be inspected", async () => {
+      let verifies = 0;
+      const t = setup({
+        docker: fakeDocker({ fail: { inspectImage: (ref) => (ref === `${REPO}:0.2.0` ? "no such image" : undefined) } }),
+        async verifyImage() {
+          verifies += 1;
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({ state: "failed", message: "no such image" });
+      expect(verifies).toBe(0);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("re-inspects the image after the check and aborts when it changed", async () => {
+      const t = setup({ docker: fakeDocker({ newImageIds: [NEW_IMAGE_ID, "sha256:swapped-image"] }) });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({
+        state: "failed",
+        message: `Image ${REPO}:0.2.0 hat sich während der Prüfung geändert — Update abgebrochen`,
+      });
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("re-inspects the image only after the check", async () => {
+      const fake = fakeDocker();
+      const inspects = () => fake.calls.filter(([m, ref]) => m === "inspectImage" && ref === `${REPO}:0.2.0`).length;
+      const seen: number[] = [];
+      const t = setup({
+        docker: fake,
+        async verifyImage() {
+          seen.push(inspects());
+        },
+      });
+      expect((await runUpdate(t.deps, REQUEST)).state).toBe("done");
+      expect(seen).toEqual([1]);
+      expect(inspects()).toBe(2);
     });
 
     it("aborts the update when the provenance check fails", async () => {
@@ -509,6 +557,7 @@ describe("runUpdate", () => {
     expect(result.state).toBe("failed");
     expect(result.message).toBe(`Image ${REPO}:0.2.0 nicht ladbar: manifest unknown`);
     expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`]);
+    expect(t.calls.map(([m]) => m)).not.toContain("removeImage");
     expect(t.reports.map((r) => r.state)).toEqual(["pulling", "failed"]);
   });
 

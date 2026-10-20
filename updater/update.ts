@@ -147,6 +147,13 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   let port: number;
   let spec: ReturnType<typeof createSpec>;
   const imageRef = `${repo}:${version}`;
+  // Once pulled, an image that does not make it into the update must not
+  // linger as a candidate for compose.
+  let pulled = false;
+  const discard = async (message: string): Promise<UpdateStatus> => {
+    if (pulled) await docker.removeImage(imageRef).catch(() => {});
+    return report("failed", message);
+  };
   try {
     const oldId = await deps.findPortal();
     old = await docker.inspectContainer(oldId);
@@ -179,6 +186,7 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     } catch (err) {
       return report("failed", `Image ${imageRef} nicht ladbar: ${errorText(err)}`);
     }
+    pulled = true;
     // The manifest list is only there (and only needed) when the daemon
     // reports the container's platform manifest, i.e. API >= 1.48.
     const newImage = old.ImageManifestDescriptor
@@ -187,13 +195,15 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
 
     report("pulling", "Herkunft wird geprüft");
     const digest = pulledDigest ?? singleRepoDigest(newImage.RepoDigests, repo);
-    if (!digest) return report("failed", `Image ${imageRef} ohne eindeutigen Digest — Update abgebrochen`);
+    if (!digest) return await discard(`Image ${imageRef} ohne eindeutigen Digest — Update abgebrochen`);
     try {
       await deps.verifyImage(digest, version);
     } catch (err) {
-      // The rejected image must not linger as a candidate for compose.
-      await docker.removeImage(imageRef).catch(() => {});
-      return report("failed", `Herkunft von ${imageRef} nicht bestätigt: ${errorText(err)} — Update abgebrochen`);
+      return await discard(`Herkunft von ${imageRef} nicht bestätigt: ${errorText(err)} — Update abgebrochen`);
+    }
+    // The tag must still point at the image whose digest was checked.
+    if ((await docker.inspectImage(imageRef)).Id !== newImage.Id) {
+      return await discard(`Image ${imageRef} hat sich während der Prüfung geändert — Update abgebrochen`);
     }
 
     spec = createSpec(old, oldImage, imageRef);
@@ -203,7 +213,7 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     const label = composeImageLabel(old, oldImage, newImage);
     if (label !== undefined) labels[COMPOSE_IMAGE] = label;
   } catch (err) {
-    return report("failed", errorText(err));
+    return discard(errorText(err));
   }
 
   // From here on every completed step is recorded so a failure undoes exactly that.

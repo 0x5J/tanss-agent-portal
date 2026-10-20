@@ -166,9 +166,9 @@ Bevor der Updater etwas ersetzt, prüft er, dass das Image vom Release-Workflow
 dieses Repos für genau diese Version gebaut wurde (GitHub Artifact Attestation,
 signiert über Sigstore). Fehlt ein gültiger Nachweis, oder sind GitHub und
 Sigstore nicht erreichbar, aktualisiert er nicht, entfernt das geladene Image
-wieder und nennt den Grund im Banner. Dafür braucht er ausgehenden Zugriff auf
-`api.github.com`, `tmaproduction.blob.core.windows.net` und
-`tuf-repo-cdn.sigstore.dev`.
+in der Regel wieder und nennt den Grund im Banner. Dafür braucht er
+ausgehenden Zugriff auf `api.github.com`,
+`tmaproduction.blob.core.windows.net` und `tuf-repo-cdn.sigstore.dev`.
 
 - **Ohne Updater** (oder von Hand): `docker compose pull && docker compose up -d`.
 - Den Updater selbst aktualisiert nur dieser Handgriff; das
