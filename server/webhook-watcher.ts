@@ -15,7 +15,7 @@ import {
 import type { SharedSession } from "./shared-session.ts";
 import type { Store } from "./store.ts";
 import { TanssError, type LinkedEntities, type TanssClient, type TanssSession } from "./tanss.ts";
-import { afterAttempt, send, type Fetcher, type SendResult } from "./webhook-sender.ts";
+import { afterAttempt, send, type Fetcher, type SendResult, type WebhookCall } from "./webhook-sender.ts";
 
 export type WebhookWatcher = {
   /** Detection pass for the owner of the shared session. */
@@ -29,7 +29,7 @@ export type WebhookWatcher = {
   notePortalChange(employeeId: number, ticketId: number, atUnix: number): void;
   /** Current status of a ticket as a new baseline. */
   baseline(session: TanssSession, ticketId: number): Promise<{ statusId: number; statusName: string }>;
-  /** Sends the sample payload; not logged. */
+  /** Sends the sample payload; not in the delivery log, but reported through onCall. */
   test(employeeId: number, webhookId: string): Promise<SendResult>;
   /** A new pending copy with a new id and the same body. */
   resend(employeeId: number, deliveryId: string): Delivery | null;
@@ -73,6 +73,8 @@ export function createWebhookWatcher(opts: {
   ticketUrl: string;
   fetcher?: Fetcher;
   now?: () => number;
+  /** Every call that went out, for the portal's log: which webhook, what for. */
+  onCall?: (call: WebhookCall, about: { employeeId: number; webhook: string; what: string }) => void;
 }): WebhookWatcher {
   const { tanss, store, shared } = opts;
   const fetcher = opts.fetcher ?? fetch;
@@ -86,6 +88,20 @@ export function createWebhookWatcher(opts: {
   let flushTimer: NodeJS.Timeout | null = null;
 
   const markKey = (employeeId: number, ticketId: number) => `${employeeId}:${ticketId}`;
+
+  /** One call with the webhook's current URL, auth and secret. */
+  function sendFor(employeeId: number, w: Webhook, call: { body: string; deliveryId: string; what: string }): Promise<SendResult> {
+    return send(fetcher, {
+      url: w.url,
+      body: call.body,
+      deliveryId: call.deliveryId,
+      secret: w.secret,
+      auth: w.auth,
+      headerName: w.headerName,
+      nowUnix: seconds(),
+      onCall: opts.onCall ? (c) => opts.onCall!(c, { employeeId, webhook: w.name, what: call.what }) : undefined,
+    });
+  }
 
   function addDeliveries(employeeId: number, fresh: Delivery[]): void {
     if (fresh.length === 0) return;
@@ -292,12 +308,9 @@ export function createWebhookWatcher(opts: {
           // URL and secret are the webhook's current ones: a moved receiver
           // must not get retries at its old address, signed with the new secret.
           // The delivery records where the attempt actually went.
+          const what = `#${d.ticketId} ${d.statusOld} → ${d.statusNew}${d.attempts > 0 ? ` · Versuch ${d.attempts + 1}` : ""}`;
           const next: Delivery = w
-            ? afterAttempt(
-                { ...d, url: w.url },
-                await send(fetcher, { url: w.url, body: d.body, deliveryId: d.id, secret: w.secret, nowUnix: at }),
-                at,
-              )
+            ? afterAttempt({ ...d, url: w.url }, await sendFor(employeeId, w, { body: d.body, deliveryId: d.id, what }), at)
             : { ...d, state: "failed", result: DELETED, finishedAt: at };
           store.setWebhookDeliveries(
             employeeId,
@@ -350,7 +363,7 @@ export function createWebhookWatcher(opts: {
       } catch (error) {
         return { ok: false, status: 0, error: error instanceof Error ? error.message : "Vorlage ungültig" };
       }
-      return send(fetcher, { url: w.url, body, deliveryId: newId(), secret: w.secret, nowUnix: seconds() });
+      return sendFor(employeeId, w, { body, deliveryId: newId(), what: "Test" });
     },
     resend(employeeId, deliveryId) {
       const list = store.webhookDeliveries(employeeId);

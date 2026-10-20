@@ -350,9 +350,9 @@ angelegt oder geändert, das Portal liest nur.
 
 1. **Einstellungen → Webhooks:** Webhook anlegen mit Name, Ziel-URL
    (`http` oder `https`), optionalem Zielstatus-Filter (leer heißt: jeder
-   Wechsel), Vorlage und optionalem Geheimnis. „Testen" schickt ein Beispiel
-   mit erfundenen Daten und zeigt dir den Statuscode oder den Fehler (nicht die
-   Antwort des Empfängers).
+   Wechsel), Vorlage und Anmeldung beim Empfänger (siehe unten). „Testen"
+   schickt ein Beispiel mit erfundenen Daten und zeigt dir den Statuscode samt
+   dem Anfang der Antwort des Empfängers, etwa `HTTP 401: {"error":"invalid token"}`.
 2. **Im Ticket** rechts unter „Webhooks" hängst du ihn an. „einmalig" löst die
    Verknüpfung, sobald der erste Aufruf angestoßen ist; schlägt er fehl, steht er
    im Protokoll und lässt sich von dort noch einmal senden. Der Abschnitt
@@ -413,6 +413,19 @@ unbekannte Platzhalter ab, ebenso eine Vorlage, die kein gültiges JSON ergibt.
 | `{{webhook.name}}` | Name des Webhooks |
 | `{{json}}` | das ganze Objekt oben |
 
+**Anmeldung beim Empfänger.** Pro Webhook wählst du, wie sich das Portal
+ausweist; der eingetragene Wert ist danach nicht mehr zu sehen, nur Anfang,
+Ende und Länge (etwa `tok_…yz (40 Zeichen)`), damit du prüfen kannst, ob er
+vollständig angekommen ist. Leerzeichen und Zeilenumbrüche am Anfang und Ende
+werden beim Speichern entfernt.
+
+- **Signatur:** `X-Portal-Signature` mit einem Geheimnis, das der Empfänger
+  nachrechnet (siehe unten). Ohne Geheimnis geht der Aufruf ohne Anmeldung raus.
+- **Bearer-Token:** `Authorization: Bearer <Token>` — für Empfänger, die einen
+  API-Schlüssel oder Token erwarten.
+- **Eigener Header:** Der Wert geht in einem Header, dessen Namen du festlegst,
+  zum Beispiel `X-Api-Key: <Wert>`.
+
 **Header.** Jeder Aufruf ist ein `POST` mit `Content-Type: application/json`
 und diesen Headern:
 
@@ -420,7 +433,8 @@ und diesen Headern:
   damit kann der Empfänger Doppelte verwerfen. Zugestellt wird mindestens
   einmal, nicht genau einmal.
 - `X-Portal-Timestamp`: Unix-Sekunden zum Zeitpunkt des Sendens.
-- `X-Portal-Signature: sha256=<hex>`: nur mit Geheimnis. Es ist der
+- `X-Portal-Signature: sha256=<hex>`: nur bei der Anmeldung „Signatur“ mit
+  Geheimnis. Es ist der
   HMAC-SHA256 über `"<timestamp>.<body>"` (Zeitstempel, Punkt, Rumpf genau so
   wie gesendet) mit dem Geheimnis als Schlüssel.
 
@@ -454,6 +468,16 @@ einen neuen Zeitstempel und eine neue Signatur, aber dieselbe
 fehlgeschlagen, und du kannst sie mit „Erneut senden" anstoßen. Dieser neue
 Versuch trägt eine neue `X-Portal-Delivery`. Das Protokoll hält alle offenen
 Zustellungen und die letzten 200 abgeschlossenen.
+
+**Fehlersuche.** Jeder Webhook-Aufruf steht auch im **Log** (Quelle „Webhook“):
+Ziel-URL, die gesendeten Header, der Inhalt, Statuscode, Dauer und die Antwort
+des Empfängers im Wortlaut. Token und Header-Werte erscheinen dort nur gekürzt,
+und jeder Techniker sieht nur die Aufrufe seiner eigenen Webhooks. In die
+Konsole bzw. das Container-Log schreibt das Portal bei einem Fehler nur den
+Statuscode, nicht die Antwort.
+Antwortet der Empfänger mit 401 oder 403, liegt es meist an der Anmeldung: Prüfe,
+ob die gewählte Art zu dem passt, was der Empfänger erwartet, und ob der
+gespeicherte Wert nach Anfang, Ende und Länge stimmt.
 
 ## Was bewusst fehlt
 

@@ -72,6 +72,8 @@ function hook(partial: Partial<Webhook> = {}): Webhook {
     name: "Teams",
     url: "http://hook.local/a",
     trigger: "status",
+    auth: "signature",
+    headerName: "",
     statusFilter: [],
     template: "{{json}}",
     secret: "",
@@ -100,6 +102,7 @@ function setup(opts: {
   statuses?: number[];
   store?: Store;
   ticketUrl?: string;
+  onCall?: Parameters<typeof createWebhookWatcher>[0]["onCall"];
 } = {}) {
   const store = opts.store ?? createMemoryStore();
   store.setSession({ employeeId: 7, apiKey: "a", refresh: "r", expire: 0, updatedAt: 0 });
@@ -115,6 +118,7 @@ function setup(opts: {
     ticketUrl: opts.ticketUrl ?? TICKET_URL,
     fetcher,
     now: () => clock.now * 1000,
+    onCall: opts.onCall,
   });
   return { store, calls, seen, clock, watcher };
 }
@@ -522,6 +526,22 @@ describe("webhook watcher", () => {
     expect(result).toEqual({ ok: true, status: 204, error: "" });
     expect((JSON.parse(String(seen[0].init.body)) as WebhookPayload).test).toBe(true);
     expect(deliveries(store)).toEqual([]);
+  });
+
+  it("reports test calls and deliveries with their webhook and purpose", async () => {
+    const reported: { employeeId: number; what: string; webhook: string; auth: string | undefined }[] = [];
+    const { watcher, clock } = setup({
+      webhooks: [hook({ auth: "bearer", secret: "tok_abcdefghijklmnop" })],
+      onCall: (call, about) => reported.push({ ...about, auth: call.headers.Authorization }),
+    });
+    await watcher.test(7, "w1");
+    await watcher.check();
+    clock.now += 1;
+    await watcher.flush();
+    expect(reported).toEqual([
+      { employeeId: 7, webhook: "Teams", what: "Test", auth: "Bearer tok_…op (20 Zeichen)" },
+      { employeeId: 7, webhook: "Teams", what: "#42 Neu → Erledigt", auth: "Bearer tok_…op (20 Zeichen)" },
+    ]);
   });
 
   it("baseline reads the current status", async () => {

@@ -10,6 +10,8 @@ const hook = (over: Partial<Webhook> = {}): Webhook => ({
   name: "Chat",
   url: "https://example.test/hook",
   trigger: "status",
+  auth: "signature",
+  headerName: "",
   statusFilter: [3],
   template: "{{json}}",
   secret: "geheim",

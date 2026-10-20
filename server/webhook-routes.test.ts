@@ -95,6 +95,46 @@ describe("webhook routes", () => {
     expect((await call(cookie, "GET", "/me/webhooks")).json().webhooks).toEqual([]);
   });
 
+  it("stores the auth mode, trims a pasted secret and shows only its hint", async () => {
+    const { login, call, store } = await setup();
+    const cookie = await login(7);
+    const token = "tok_abcdefghijklmnopqrstuvwxyz";
+    const created = await call(cookie, "POST", "/me/webhooks", { ...hookBody, auth: "bearer", secret: `  ${token}\n` });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().webhook).toMatchObject({ auth: "bearer", headerName: "", hasSecret: true, secretHint: "tok_…yz (30 Zeichen)" });
+    expect(created.body).not.toContain(token);
+    expect(store.webhooks(7)[0]!.secret).toBe(token);
+
+    const id = created.json().webhook.id as string;
+    const header = await call(cookie, "PUT", `/me/webhooks/${id}`, { ...hookBody, auth: "header", headerName: "X-Api-Key" });
+    expect(header.json().webhook).toMatchObject({ auth: "header", headerName: "X-Api-Key" });
+    // hookBody carries a secret, so it replaces the token
+    expect(store.webhooks(7)[0]!.secret).toBe("geheim");
+
+    expect((await call(cookie, "PUT", `/me/webhooks/${id}`, { ...hookBody, auth: "header", headerName: "X-Portal-Signature" })).statusCode).toBe(400);
+    expect((await call(cookie, "PUT", `/me/webhooks/${id}`, { ...hookBody, auth: "header", headerName: "" })).statusCode).toBe(400);
+    expect((await call(cookie, "POST", "/me/webhooks", { ...hookBody, auth: "basic" })).statusCode).toBe(400);
+    // a mode other than "header" forgets the header name
+    const back = await call(cookie, "PUT", `/me/webhooks/${id}`, { ...hookBody, auth: "signature" });
+    expect(back.json().webhook).toMatchObject({ auth: "signature", headerName: "" });
+  });
+
+  it("refuses a secret of only whitespace instead of dropping the stored one", async () => {
+    const { login, call, store } = await setup();
+    const cookie = await login(7);
+    const id = (await call(cookie, "POST", "/me/webhooks", { ...hookBody, auth: "bearer" })).json().webhook.id as string;
+    for (const blank of [" ", "\n", " \t\r\n "]) {
+      const res = await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", secret: blank });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("Der eingetragene Wert besteht nur aus Leerzeichen");
+    }
+    expect((await call(cookie, "POST", "/me/webhooks", { ...hookBody, secret: "  " })).statusCode).toBe(400);
+    expect(store.webhooks(7)[0]!.secret).toBe("geheim");
+    // an explicit empty string still removes it
+    await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", secret: "" });
+    expect(store.webhooks(7)[0]!.secret).toBe("");
+  });
+
   it("keeps every omitted optional field on PUT", async () => {
     const { login, call, store } = await setup();
     const cookie = await login(7);
@@ -134,7 +174,7 @@ describe("webhook routes", () => {
     expect((await post({ ...hookBody, url: "https://user:pass@hook.example/a" })).statusCode).toBe(400);
     expect((await post({ ...hookBody, url: "https://user@hook.example/a" })).statusCode).toBe(400);
     expect((await post({ ...hookBody, statusFilter: [1.5] })).statusCode).toBe(400);
-    expect((await post({ ...hookBody, secret: "s".repeat(201) })).statusCode).toBe(400);
+    expect((await post({ ...hookBody, secret: "s".repeat(2001) })).statusCode).toBe(400);
     const badTemplate = await post({ ...hookBody, template: "{{gibtsnicht}}" });
     expect(badTemplate.statusCode).toBe(400);
     expect(badTemplate.json().error).toBe("Unbekannter Platzhalter: {{gibtsnicht}}");

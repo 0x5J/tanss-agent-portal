@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCallLog, loggableBody } from "./log.ts";
+import { createCallLog, loggableBody, visibleLog } from "./log.ts";
 
 function entry(overrides: Record<string, unknown> = {}) {
   return {
@@ -86,5 +86,17 @@ describe("loggableBody", () => {
 
   it("records nothing for a request without a body", () => {
     expect(loggableBody("/api/v1/tickets/own", undefined)).toBe("");
+  });
+});
+
+describe("visibleLog", () => {
+  it("shows TANSS calls to everyone and webhook calls only to their owner", () => {
+    const log = createCallLog();
+    log.add(entry());
+    log.add(entry({ kind: "webhook", employeeId: 7, path: "https://hooks.example/a" }));
+    log.add(entry({ kind: "webhook", employeeId: 8, path: "https://hooks.example/b" }));
+    log.add(entry({ kind: "webhook", path: "https://hooks.example/ohne-besitzer" }));
+    expect(visibleLog(log.since(0), 7).map((e) => e.path)).toEqual(["/api/v1/supports", "https://hooks.example/a"]);
+    expect(visibleLog(log.since(0), 8).map((e) => e.path)).toEqual(["/api/v1/supports", "https://hooks.example/b"]);
   });
 });

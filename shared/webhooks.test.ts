@@ -17,6 +17,8 @@ import {
   toPublic,
   trimDeliveries,
   type Delivery,
+  isHeaderName,
+  secretHint,
 } from "./webhooks.ts";
 import type { ThreadEntry } from "./thread.ts";
 
@@ -259,5 +261,37 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("https://user:pass@h.local/a")).toBe(false);
     expect(isHttpUrl("https://user@h.local/a")).toBe(false);
     expect(isHttpUrl("kein url")).toBe(false);
+  });
+});
+
+describe("auth", () => {
+  it("defaults to the signature and keeps a valid header mode", () => {
+    const [old, bearer, header, broken] = parseWebhooks([
+      { id: "a", name: "alt", url: "http://h" },
+      { id: "b", name: "token", url: "http://h", auth: "bearer", secret: "tok_x" },
+      { id: "c", name: "eigen", url: "http://h", auth: "header", headerName: "X-Api-Key" },
+      { id: "d", name: "kaputt", url: "http://h", auth: "header", headerName: "Content-Type" },
+    ]);
+    expect(old).toMatchObject({ auth: "signature", headerName: "" });
+    expect(bearer).toMatchObject({ auth: "bearer", headerName: "" });
+    expect(header).toMatchObject({ auth: "header", headerName: "X-Api-Key" });
+    expect(broken).toMatchObject({ auth: "signature", headerName: "" });
+  });
+
+  it("checks header names", () => {
+    expect(isHeaderName("X-Api-Key")).toBe(true);
+    expect(isHeaderName("Authorization")).toBe(true);
+    expect(isHeaderName("X-Portal-Signature")).toBe(false);
+    expect(isHeaderName("mit leerzeichen")).toBe(false);
+    expect(isHeaderName("")).toBe(false);
+  });
+
+  it("hints at a secret without revealing it", () => {
+    expect(secretHint("")).toBe("");
+    expect(secretHint("kurz")).toBe("(4 Zeichen)");
+    expect(secretHint("tok_abcdefghijklmnopqrstuvwxyz")).toBe("tok_…yz (30 Zeichen)");
+    const [w] = parseWebhooks([{ id: "a", name: "x", url: "http://h", secret: "tok_abcdefghijklmnopqrstuvwxyz" }]);
+    expect(toPublic(w)).toMatchObject({ hasSecret: true, secretHint: "tok_…yz (30 Zeichen)" });
+    expect(JSON.stringify(toPublic(w))).not.toContain("abcdefghijklmnop");
   });
 });

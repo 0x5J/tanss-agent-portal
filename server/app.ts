@@ -42,7 +42,7 @@ import {
   templateKey,
   type BookingTemplate,
 } from "../shared/template.ts";
-import { createCallLog, loggableBody, type CallLog } from "./log.ts";
+import { createCallLog, loggableBody, visibleLog, type CallLog } from "./log.ts";
 import { readSession, requireEmployee, requireSession, type SessionData } from "./session.ts";
 import { VERSION } from "./version.ts";
 import { createSharedSession, type SharedSession } from "./shared-session.ts";
@@ -1087,10 +1087,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
   // --- log -------------------------------------------------------------------
 
   app.get("/me/log", async (request, reply) => {
-    await employee(request, reply);
+    const employeeId = await employee(request, reply);
     const raw = Number((request.query as { since?: string }).since ?? 0);
     const since = Number.isFinite(raw) && raw >= 0 ? raw : 0;
-    return { entries: log.since(since), lastId: log.lastId() };
+    return { entries: visibleLog(log.since(since), employeeId), lastId: log.lastId() };
   });
 
   app.delete("/me/log", async (request, reply) => {
