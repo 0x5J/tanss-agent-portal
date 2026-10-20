@@ -11,6 +11,7 @@ const NAME = "agent-portal-portal-1";
 const OLD_IP = "172.18.0.3";
 const NEW_IP = "172.18.0.7";
 const NEW_IMAGE_ID = "sha256:new-image";
+const NEW_DIGEST = "sha256:" + "b".repeat(64);
 
 type Method = keyof DockerApi;
 type Call = [Method, ...unknown[]];
@@ -72,11 +73,18 @@ function fakeDocker(
     oldRunning?: boolean;
     newRunning?: boolean;
     newManifests?: ImageInfo["Manifests"];
+    /** What the pull stream reports as digest; null means it reported none. */
+    pullDigest?: string | null;
+    /** RepoDigests of the pulled image. */
+    newRepoDigests?: string[];
+    /** Ids the pulled image reports, one per inspect; the last one repeats. */
+    newImageIds?: string[];
   } = {},
 ) {
   const calls: Call[] = [];
   const old = opts.old ?? oldContainer();
   const newIps = [...(opts.newIps ?? [NEW_IP])];
+  const newImageIds = [...(opts.newImageIds ?? [NEW_IMAGE_ID])];
   let oldName = old.Name;
 
   function record(method: Method, ...args: unknown[]) {
@@ -108,10 +116,16 @@ function fakeDocker(
       if (o) record("inspectImage", ref, o);
       else record("inspectImage", ref);
       if (ref === old.Image) return image("sha256:old-image");
-      return o?.manifests ? { ...image(NEW_IMAGE_ID), Manifests: opts.newManifests ?? [] } : image(NEW_IMAGE_ID);
+      const id = newImageIds.length > 1 ? newImageIds.shift()! : newImageIds[0]!;
+      const fresh = { ...image(id), RepoDigests: opts.newRepoDigests };
+      return o?.manifests ? { ...fresh, Manifests: opts.newManifests ?? [] } : fresh;
     },
     async pullImage(repo, tag) {
       record("pullImage", repo, tag);
+      return opts.pullDigest === undefined ? NEW_DIGEST : opts.pullDigest;
+    },
+    async removeImage(ref) {
+      record("removeImage", ref);
     },
     async tagImage(ref, repo, tag) {
       record("tagImage", ref, repo, tag);
@@ -146,6 +160,7 @@ function setup(
     docker?: ReturnType<typeof fakeDocker>;
     health?: (url: string) => string | null;
     findPortal?: () => Promise<string>;
+    verifyImage?: (digest: string, version: string) => Promise<void>;
     healthTimeoutMs?: number;
   } = {},
 ) {
@@ -160,6 +175,7 @@ function setup(
     docker: fake.docker,
     repo: REPO,
     findPortal: opts.findPortal ?? (async () => OLD_ID),
+    verifyImage: opts.verifyImage ?? (async () => {}),
     async health(url: string) {
       healthUrls.push(url);
       return health(url);
@@ -207,7 +223,7 @@ describe("runUpdate", () => {
       `tagImage(${REPO}:0.2.0, ${REPO}, latest)`,
     ]);
     expect(t.healthUrls).toEqual([`http://${OLD_IP}:3848/health`, `http://${NEW_IP}:3848/health`]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "done"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "done"]);
     expect(result).toBe(t.reports.at(-1));
     expect(result).toEqual({
       id: "req-1",
@@ -234,7 +250,10 @@ describe("runUpdate", () => {
     // Ruling J: compose's image label follows the new image id.
     expect(body.Labels["com.docker.compose.image"]).toBe(NEW_IMAGE_ID);
     expect(body.Labels["com.docker.compose.project"]).toBe("agent-portal");
-    expect(t.calls).toContainEqual(["inspectImage", `${REPO}:0.2.0`]);
+    expect(t.calls.find(([m, ref]) => m === "inspectImage" && ref === `${REPO}:0.2.0`)).toEqual([
+      "inspectImage",
+      `${REPO}:0.2.0`,
+    ]);
   });
 
   it("sets the compose image label to the new platform manifest on the containerd store", async () => {
@@ -393,12 +412,152 @@ describe("runUpdate", () => {
     expect(t.calls).toEqual([]);
   });
 
+  describe("provenance", () => {
+    const FAILED = `Herkunft von ${REPO}:0.2.0 nicht bestätigt: kein Herkunftsnachweis bei GitHub gefunden — Update abgebrochen`;
+    const rejecting = async () => {
+      throw new Error("kein Herkunftsnachweis bei GitHub gefunden");
+    };
+
+    it("checks the provenance of the pulled digest before stopping anything", async () => {
+      const fake = fakeDocker();
+      const verified: { digest: string; version: string; before: string[] }[] = [];
+      const t = setup({
+        docker: fake,
+        async verifyImage(digest, version) {
+          verified.push({ digest, version, before: mutating(fake.calls) });
+        },
+      });
+      await runUpdate(t.deps, REQUEST);
+
+      expect(verified).toEqual([{ digest: NEW_DIGEST, version: "0.2.0", before: [`pullImage(${REPO}, 0.2.0)`] }]);
+      expect(t.reports.map((r) => [r.state, r.message]).slice(0, 2)).toEqual([
+        ["pulling", "Image wird geladen"],
+        ["pulling", "Herkunft wird geprüft"],
+      ]);
+    });
+
+    it("falls back to RepoDigests without a digest in the pull stream", async () => {
+      const verified: string[] = [];
+      const t = setup({
+        docker: fakeDocker({
+          pullDigest: null,
+          newRepoDigests: [`other/repo@sha256:${"c".repeat(64)}`, `${REPO}@${NEW_DIGEST}`],
+        }),
+        async verifyImage(digest) {
+          verified.push(digest);
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+      expect(verified).toEqual([NEW_DIGEST]);
+      expect(result.state).toBe("done");
+    });
+
+    it("accepts the same digest listed twice in RepoDigests", async () => {
+      const verified: string[] = [];
+      const t = setup({
+        docker: fakeDocker({ pullDigest: null, newRepoDigests: [`${REPO}@${NEW_DIGEST}`, `${REPO}@${NEW_DIGEST}`] }),
+        async verifyImage(digest) {
+          verified.push(digest);
+        },
+      });
+      await runUpdate(t.deps, REQUEST);
+      expect(verified).toEqual([NEW_DIGEST]);
+    });
+
+    it.each([
+      ["two different digests", [`${REPO}@${NEW_DIGEST}`, `${REPO}@sha256:${"c".repeat(64)}`]],
+      ["no digest of the repository", [`other/repo@${NEW_DIGEST}`]],
+      ["no RepoDigests", undefined],
+      ["a malformed digest", [`${REPO}@sha256:${"B".repeat(64)}`]],
+    ])("fails without a unique digest (%s)", async (_label, newRepoDigests) => {
+      let verifies = 0;
+      const t = setup({
+        docker: fakeDocker({ pullDigest: null, newRepoDigests }),
+        async verifyImage() {
+          verifies += 1;
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result.state).toBe("failed");
+      expect(result.message).toBe(`Image ${REPO}:0.2.0 ohne eindeutigen Digest — Update abgebrochen`);
+      expect(verifies).toBe(0);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("removes the pulled image when it cannot be inspected", async () => {
+      let verifies = 0;
+      const t = setup({
+        docker: fakeDocker({ fail: { inspectImage: (ref) => (ref === `${REPO}:0.2.0` ? "no such image" : undefined) } }),
+        async verifyImage() {
+          verifies += 1;
+        },
+      });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({ state: "failed", message: "no such image" });
+      expect(verifies).toBe(0);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("re-inspects the image after the check and aborts when it changed", async () => {
+      const t = setup({ docker: fakeDocker({ newImageIds: [NEW_IMAGE_ID, "sha256:swapped-image"] }) });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({
+        state: "failed",
+        message: `Image ${REPO}:0.2.0 hat sich während der Prüfung geändert — Update abgebrochen`,
+      });
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("re-inspects the image only after the check", async () => {
+      const fake = fakeDocker();
+      const inspects = () => fake.calls.filter(([m, ref]) => m === "inspectImage" && ref === `${REPO}:0.2.0`).length;
+      const seen: number[] = [];
+      const t = setup({
+        docker: fake,
+        async verifyImage() {
+          seen.push(inspects());
+        },
+      });
+      expect((await runUpdate(t.deps, REQUEST)).state).toBe("done");
+      expect(seen).toEqual([1]);
+      expect(inspects()).toBe(2);
+    });
+
+    it("aborts the update when the provenance check fails", async () => {
+      const t = setup({ verifyImage: rejecting });
+      const result = await runUpdate(t.deps, REQUEST);
+
+      expect(result).toMatchObject({ state: "failed", message: FAILED });
+      expect(t.reports.at(-1)).toBe(result);
+      const methods = t.calls.map(([m]) => m);
+      for (const m of ["stopContainer", "renameContainer", "createContainer"] as const) {
+        expect(methods).not.toContain(m);
+      }
+    });
+
+    it("removes the pulled image when the provenance check fails", async () => {
+      const t = setup({ verifyImage: rejecting });
+      await runUpdate(t.deps, REQUEST);
+      expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`, `removeImage(${REPO}:0.2.0)`]);
+    });
+
+    it("stays failed when removing the rejected image fails", async () => {
+      const t = setup({ docker: fakeDocker({ fail: { removeImage: "image is in use" } }), verifyImage: rejecting });
+      const result = await runUpdate(t.deps, REQUEST);
+      expect(result).toMatchObject({ state: "failed", message: FAILED });
+    });
+  });
+
   it("fails without stopping anything when the pull fails", async () => {
     const t = setup({ docker: fakeDocker({ fail: { pullImage: "manifest unknown" } }) });
     const result = await runUpdate(t.deps, REQUEST);
     expect(result.state).toBe("failed");
     expect(result.message).toBe(`Image ${REPO}:0.2.0 nicht ladbar: manifest unknown`);
     expect(mutating(t.calls)).toEqual([`pullImage(${REPO}, 0.2.0)`]);
+    expect(t.calls.map(([m]) => m)).not.toContain("removeImage");
     expect(t.reports.map((r) => r.state)).toEqual(["pulling", "failed"]);
   });
 
@@ -419,7 +578,7 @@ describe("runUpdate", () => {
       `renameContainer(${OLD_ID}, ${NAME})`,
       `startContainer(${OLD_ID})`,
     ]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "rolledBack"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "rolledBack"]);
     // Polled every 2 s for the default 90 s.
     expect(new Set(t.sleeps)).toEqual(new Set([2000]));
     expect(t.elapsed()).toBeGreaterThanOrEqual(90_000);
@@ -485,7 +644,7 @@ describe("runUpdate", () => {
       `renameContainer(${OLD_ID}, ${NAME})`,
       `startContainer(${OLD_ID})`,
     ]);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "rolledBack"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "rolledBack"]);
   });
 
   it("rolls back when connecting an extra network fails", async () => {
@@ -647,7 +806,7 @@ describe("runUpdate", () => {
     expect(result.message).toMatch(/^Update auf 0\.2\.0 abgeschlossen/);
     expect(result.message).toContain("no space left");
     expect(names(t.calls)).not.toContain(`startContainer(${OLD_ID})`);
-    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "starting", "checking", "done"]);
+    expect(t.reports.map((r) => r.state)).toEqual(["pulling", "pulling", "starting", "checking", "done"]);
   });
 
   it("does not retag a digest reference", async () => {

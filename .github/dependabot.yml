@@ -1,4 +1,5 @@
-# Haelt die per Commit-Hash festgelegten Actions in .github/workflows aktuell.
+# Haelt die per Commit-Hash festgelegten Actions in .github/workflows und die
+# Sigstore-Pakete des Updaters (updater/package.json) aktuell.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -8,3 +9,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /updater
+    schedule:
+      interval: monthly
+    groups:
+      sigstore:
+        patterns: ["@sigstore/*"]

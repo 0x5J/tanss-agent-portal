@@ -162,6 +162,14 @@ Der Updater ist der einzige Dienst mit Docker-Zugriff (Socket) und hat keine
 Ports. Das Portal selbst bekommt keine Docker-Rechte und reicht nur eine
 Versionsnummer weiter.
 
+Bevor der Updater etwas ersetzt, prüft er, dass das Image vom Release-Workflow
+dieses Repos für genau diese Version gebaut wurde (GitHub Artifact Attestation,
+signiert über Sigstore). Fehlt ein gültiger Nachweis, oder sind GitHub und
+Sigstore nicht erreichbar, aktualisiert er nicht, entfernt das geladene Image
+in der Regel wieder und nennt den Grund im Banner. Dafür braucht er
+ausgehenden Zugriff auf `api.github.com`,
+`tmaproduction.blob.core.windows.net` und `tuf-repo-cdn.sigstore.dev`.
+
 - **Ohne Updater** (oder von Hand): `docker compose pull && docker compose up -d`.
 - Den Updater selbst aktualisiert nur dieser Handgriff; das
   [Changelog](CHANGELOG.md) nennt, wann das nötig ist.
@@ -172,6 +180,22 @@ Versionsnummer weiter.
   Version weiter.
 - `UPDATE_CHECK=0` schaltet die Abfrage bei GitHub ab (kein Banner).
 - `UPDATE_CHANNEL=staging` zeigt auch Pre-Releases an (siehe Staging).
+- Nur für Forks, die eigene Images veröffentlichen: In der eigenen
+  `compose.yaml` (nicht in der `.env`, die der Updater nicht liest) beim Dienst
+  `updater` unter `environment` setzen: `PORTAL_REPO` (das eigene Image,
+  Standard `ghcr.io/0x5j/tanss-agent-portal`) und `PORTAL_SOURCE` (das eigene
+  GitHub-Repo als `owner/name`, Standard `0x5J/tanss-agent-portal`). Die
+  Herkunftsprüfung erwartet den Nachweis dann von diesem Repo.
+
+### Herkunft selbst prüfen
+
+Mit der [GitHub-CLI](https://cli.github.com/) lässt sich der Nachweis auch von
+Hand prüfen (gültig ab Version 0.5.0):
+
+```bash
+gh attestation verify oci://ghcr.io/0x5j/tanss-agent-portal:<version> --owner 0x5J
+gh attestation verify oci://ghcr.io/0x5j/tanss-agent-portal-updater:<version> --owner 0x5J
+```
 
 ### Wenn das Portal nach einem Update nicht zurückkommt
 
@@ -491,6 +515,7 @@ Für Änderungen am Code braucht es einen Klon des Repos und Node.js ≥ 22:
 ```bash
 cp .env.example .env    # Pflichtwerte eintragen
 npm install
+npm install --prefix updater
 npm run dev             # API auf :3848, Oberfläche auf :5173
 npm run check           # Typen + Tests
 ```
@@ -511,7 +536,7 @@ server/   Fastify-Routen (app.ts, agent.ts), TANSS-Client, geteilte Sitzung, Anm
           Dashboard-Sammler, LLM-Client, Store, TOTP, Protokoll
 shared/   reine Logik: Ticketzeilen, Thread, Tageszeitleiste, Berlin-Zeit, Agent-Prompts/-Fakten
 src/      React-Oberfläche; Tokens aus dem Artboard in styles/app.css
-updater/  eigener Container für Ein-Klick-Updates (nur Node-Bordmittel, Docker-Socket)
+updater/  eigener Container für Ein-Klick-Updates (Node-Bordmittel plus Sigstore-Prüfung, Docker-Socket)
 docs/     Design-Artboard
 ```
 

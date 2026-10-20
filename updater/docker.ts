@@ -1,5 +1,5 @@
 // Minimal Docker Engine API client over the Unix socket. Node built-ins only:
-// the updater image has no npm dependencies.
+// the updater image has npm dependencies, but this client uses none of them.
 import { request } from "node:http";
 
 // 1.48 brings the per-platform manifest data (ImageManifestDescriptor,
@@ -58,6 +58,8 @@ export interface ImageInfo {
     Labels: Record<string, string> | null;
     [key: string]: unknown;
   };
+  /** Registry digests of the image, as "repo@sha256:...". */
+  RepoDigests?: string[];
   /** API >= 1.48 with ?manifests=1 on the containerd image store. */
   Manifests?: { Kind?: string; Available?: boolean; Descriptor: Descriptor; [key: string]: unknown }[];
 }
@@ -66,7 +68,9 @@ export interface DockerApi {
   inspectContainer(id: string): Promise<ContainerInfo>;
   listContainers(labels: Record<string, string>): Promise<{ Id: string; Names: string[] }[]>;
   inspectImage(ref: string, opts?: { manifests?: boolean }): Promise<ImageInfo>;
-  pullImage(repo: string, tag: string): Promise<void>;
+  /** Pulls the image; resolves to the digest the daemon reports, or null if it names none. */
+  pullImage(repo: string, tag: string): Promise<string | null>;
+  removeImage(ref: string): Promise<void>;
   tagImage(ref: string, repo: string, tag: string): Promise<void>;
   createContainer(name: string, body: object): Promise<string>;
   startContainer(id: string): Promise<void>;
@@ -112,6 +116,28 @@ function pullStreamError(text: string): string | null {
     if (typeof obj.errorDetail?.message === "string" && obj.errorDetail.message) {
       return obj.errorDetail.message;
     }
+  }
+  return null;
+}
+
+const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+// The daemon reports the pulled manifest digest as a status line
+// {"status":"Digest: sha256:..."}. Only a well-formed digest is accepted.
+function pullStreamDigest(text: string): string | null {
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const status = (parsed as { status?: unknown }).status;
+    if (typeof status !== "string" || !status.startsWith("Digest: ")) continue;
+    const digest = status.slice("Digest: ".length).trim();
+    if (DIGEST_PATTERN.test(digest)) return digest;
   }
   return null;
 }
@@ -206,6 +232,10 @@ export function createDockerApi(
       });
       const failure = pullStreamError(text);
       if (failure) throw new DockerError(`POST /images/create: ${failure}`, 200);
+      return pullStreamDigest(text);
+    },
+    async removeImage(ref) {
+      await call("DELETE", `/images/${enc(ref)}`);
     },
     async tagImage(ref, repo, tag) {
       await call("POST", `/images/${enc(ref)}/tag?repo=${enc(repo)}&tag=${enc(tag)}`);

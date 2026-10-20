@@ -1,5 +1,5 @@
-// One update run: pull the requested version, replace the portal container
-// and verify the new one via /health. Anything that goes wrong after the old
+// One update run: pull the requested version, check its provenance, replace
+// the portal container and verify the new one via /health. Anything that goes wrong after the old
 // container was touched is undone, so the old version keeps running.
 import { compareVersions, isVersion, type UpdateRequest, type UpdateState, type UpdateStatus } from "../shared/update.ts";
 import type { ContainerInfo, DockerApi } from "./docker.ts";
@@ -24,12 +24,16 @@ export interface UpdateDeps {
   docker: DockerApi;
   repo: string;
   findPortal(): Promise<string>;
+  /** Rejects with the reason when the image digest was not built from the release. */
+  verifyImage(digest: string, version: string): Promise<void>;
   health(url: string): Promise<string | null>;
   report(status: UpdateStatus): void;
   now(): number;
   sleep(ms: number): Promise<void>;
   healthTimeoutMs?: number;
 }
+
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 const UNKNOWN_ERROR = "unbekannter Fehler";
 
@@ -44,6 +48,16 @@ function parseReference(ref: string): { repo: string; tag: string | null; digest
   const colon = ref.lastIndexOf(":");
   if (colon > ref.lastIndexOf("/")) return { repo: ref.slice(0, colon), tag: ref.slice(colon + 1), digest: false };
   return { repo: ref, tag: null, digest: false };
+}
+
+/** The one well-formed digest of `repo` among the image's RepoDigests, else null. */
+function singleRepoDigest(repoDigests: string[] | undefined, repo: string): string | null {
+  const prefix = `${repo}@`;
+  const digests = new Set(
+    (repoDigests ?? []).filter((d) => d.startsWith(prefix)).map((d) => d.slice(prefix.length)),
+  );
+  const [digest] = digests;
+  return digests.size === 1 && digest !== undefined && DIGEST.test(digest) ? digest : null;
 }
 
 /** The reference compose started the portal with, also after earlier updates. */
@@ -133,6 +147,13 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
   let port: number;
   let spec: ReturnType<typeof createSpec>;
   const imageRef = `${repo}:${version}`;
+  // Once pulled, an image that does not make it into the update must not
+  // linger as a candidate for compose.
+  let pulled = false;
+  const discard = async (message: string): Promise<UpdateStatus> => {
+    if (pulled) await docker.removeImage(imageRef).catch(() => {});
+    return report("failed", message);
+  };
   try {
     const oldId = await deps.findPortal();
     old = await docker.inspectContainer(oldId);
@@ -159,16 +180,31 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     }
 
     report("pulling", "Image wird geladen");
+    let pulledDigest: string | null;
     try {
-      await docker.pullImage(repo, version);
+      pulledDigest = await docker.pullImage(repo, version);
     } catch (err) {
       return report("failed", `Image ${imageRef} nicht ladbar: ${errorText(err)}`);
     }
+    pulled = true;
     // The manifest list is only there (and only needed) when the daemon
     // reports the container's platform manifest, i.e. API >= 1.48.
     const newImage = old.ImageManifestDescriptor
       ? await docker.inspectImage(imageRef, { manifests: true })
       : await docker.inspectImage(imageRef);
+
+    report("pulling", "Herkunft wird geprüft");
+    const digest = pulledDigest ?? singleRepoDigest(newImage.RepoDigests, repo);
+    if (!digest) return await discard(`Image ${imageRef} ohne eindeutigen Digest — Update abgebrochen`);
+    try {
+      await deps.verifyImage(digest, version);
+    } catch (err) {
+      return await discard(`Herkunft von ${imageRef} nicht bestätigt: ${errorText(err)} — Update abgebrochen`);
+    }
+    // The tag must still point at the image whose digest was checked.
+    if ((await docker.inspectImage(imageRef)).Id !== newImage.Id) {
+      return await discard(`Image ${imageRef} hat sich während der Prüfung geändert — Update abgebrochen`);
+    }
 
     spec = createSpec(old, oldImage, imageRef);
     const labels = (spec.body as { Labels: Record<string, string> }).Labels;
@@ -177,7 +213,7 @@ export async function runUpdate(deps: UpdateDeps, request: UpdateRequest): Promi
     const label = composeImageLabel(old, oldImage, newImage);
     if (label !== undefined) labels[COMPOSE_IMAGE] = label;
   } catch (err) {
-    return report("failed", errorText(err));
+    return discard(errorText(err));
   }
 
   // From here on every completed step is recorded so a failure undoes exactly that.
