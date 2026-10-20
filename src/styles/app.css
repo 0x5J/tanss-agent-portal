@@ -601,3 +601,123 @@ button.search:hover { background: var(--soft2); }
 .idea { border-radius: 12px; padding: 8px 10px; background: var(--bg); }
 .idea.guess { box-shadow: inset 0 0 0 1px var(--line); background: transparent; }
 .import-row.dropped { opacity: 0.5; }
+
+/* --- kit (src/ui/kit.tsx) --------------------------------------------------- */
+/* A page: 32px around, sections 32px apart, readable width. */
+.view { padding: 32px; display: flex; flex-direction: column; gap: 32px; max-width: 1240px; }
+.view.wide { max-width: none; }
+.view.tight { gap: 24px; }
+.page-head { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.page-head-text { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.page-head h1 { font-size: 32px; line-height: 40px; }
+.page-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.section-title { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; }
+.section-title h2 { font-size: 20px; line-height: 28px; }
+.section-title .note { font-size: 13px; color: var(--body); }
+.section-title-aside { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.h2 { font-size: 20px; line-height: 28px; font-weight: 700; font-feature-settings: "ss01"; }
+.lead { color: var(--body); max-width: 68ch; text-wrap: pretty; }
+.soft-card { background: var(--soft); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.soft-card.p20 { padding: 20px; }
+.btn.lg { padding: 12px 16px; }
+
+.seg { display: inline-flex; gap: 4px; background: var(--soft); border-radius: 36px; padding: 4px; flex-wrap: wrap; }
+.seg.on-soft { background: var(--bg); }
+.seg-item {
+  background: transparent; color: var(--ink); border: 0; border-radius: 36px; padding: 8px 14px;
+  font-size: 14px; font-weight: 500; line-height: 16px; cursor: pointer; transition: background 150ms ease; white-space: nowrap;
+}
+.seg.small .seg-item { padding: 6px 12px; }
+.seg-item:hover { background: var(--soft2); }
+.seg.on-soft .seg-item:hover { background: var(--soft); }
+.seg-item.active { background: var(--primary); color: var(--on-primary); }
+.seg-item .count { color: var(--body); font-weight: 400; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.seg-item.active .count { color: inherit; opacity: 0.7; }
+
+.switch {
+  width: 44px; height: 26px; border-radius: 999px; background: var(--pressed); position: relative; flex: none;
+  border: 0; padding: 0; cursor: pointer; transition: background 150ms ease; display: inline-block;
+}
+.switch .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: var(--bg); transition: left 150ms ease; }
+.switch.on { background: var(--primary); }
+.switch.on .knob { left: 21px; background: var(--on-primary); }
+.switch:disabled { opacity: 0.45; cursor: default; }
+
+.hint { display: flex; align-items: center; gap: 14px; background: var(--soft); border-radius: 16px; padding: 14px 16px 14px 14px; flex-wrap: wrap; }
+.hint-icon {
+  width: 32px; height: 32px; border-radius: 999px; background: var(--primary); color: var(--on-primary);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.hint-text { flex: 1 1 320px; min-width: 0; text-wrap: pretty; }
+.hint-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tiles.wide { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.tile { background: var(--soft); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tile-label { font-size: 13px; color: var(--body); }
+.tile-value { font-size: 32px; line-height: 40px; font-weight: 700; font-feature-settings: "ss01"; font-variant-numeric: tabular-nums; }
+.tile-value.danger { color: var(--red); }
+.tile-value.warn { color: var(--amber); }
+.tile-value.ok { color: var(--green); }
+.tile-hint { font-size: 12px; line-height: 16px; color: var(--body); text-wrap: pretty; }
+
+.ring { border-radius: 999px; position: relative; flex: none; }
+.ring-hole {
+  position: absolute; inset: 18px; border-radius: 999px; background: var(--soft);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.ring-total { font-size: 24px; line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ring-unit { font-size: 12px; line-height: 16px; color: var(--body); }
+.key-dot { width: 10px; height: 10px; border-radius: 999px; flex: none; display: inline-block; }
+
+/* Tables of the redesign: a 2px ink rule on top, hairlines between rows. */
+.table { display: flex; flex-direction: column; border-top: 2px solid var(--ink); min-width: 0; }
+.table-scroll { overflow: auto; border-top: 2px solid var(--ink); }
+.table-scroll > .table { border-top: 0; }
+.thead { display: grid; align-items: center; height: 44px; font-size: 13px; color: var(--body); border-bottom: 1px solid var(--line); }
+.trow { display: grid; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line); font-size: 14px; transition: background 150ms ease; }
+.trow.tall { min-height: 56px; }
+.trow.clickable { cursor: pointer; }
+.trow.clickable:hover { background: var(--soft); }
+.trow.selected { background: var(--soft); }
+.num-cell { font-variant-numeric: tabular-nums; }
+
+/* Ranked rows with a thin bar under the label (Top-Kunden, Top-Tickets). */
+.rank-row {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; margin: 0 -10px; width: calc(100% + 20px);
+  border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); font-size: 14px;
+}
+button.rank-row { cursor: pointer; }
+button.rank-row:hover { background: var(--soft); }
+.rank-row.active { background: var(--soft2); border-radius: 12px; }
+.rank-row .line { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
+.rank-row .label { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rank-row .val { color: var(--body); font-variant-numeric: tabular-nums; flex: none; }
+.rank-row .track { display: block; width: 100%; height: 6px; border-radius: 999px; background: var(--pressed); overflow: hidden; }
+.rank-row .bar { display: block; height: 100%; background: var(--ink); border-radius: 999px; }
+
+/* Vertical bars on an ink baseline; only the peak carries its number. */
+.vbars { display: flex; flex-direction: column; gap: 8px; }
+.vbars-plot { position: relative; display: flex; align-items: flex-end; gap: 4px; border-bottom: 2px solid var(--ink); }
+.vbar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; background: transparent; border: 0; padding: 0; border-radius: 8px 8px 0 0; }
+button.vbar { cursor: pointer; }
+button.vbar:hover { background: var(--soft); }
+.vbar .v { font-size: 12px; line-height: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.vbar .b { display: block; width: 100%; max-width: 28px; background: var(--v1); border-radius: 6px 6px 0 0; }
+.vbar.dim .b { background: var(--v4); }
+.vbars-ticks { display: flex; gap: 4px; }
+.vbars-ticks span { flex: 1; min-width: 0; text-align: center; font-size: 12px; color: var(--body); white-space: nowrap; }
+
+.empty-note { background: var(--soft); border-radius: 16px; padding: 20px; color: var(--body); }
+.popover { position: absolute; z-index: 20; background: var(--bg); border-radius: 16px; box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; }
+.popover-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: 0; border-radius: 10px;
+  padding: 8px 10px; text-align: left; cursor: pointer; font-size: 14px; color: var(--ink);
+}
+.popover-item:hover { background: var(--soft); }
+.popover-item.active { background: var(--soft2); font-weight: 500; }
+.popover-label { font-size: 12px; color: var(--body); padding: 8px 10px; }
+.linkish { background: transparent; border: 0; padding: 0; font-size: 14px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: var(--ink); }
+.linkish.muted { color: var(--body); text-decoration: none; }
+.linkish.muted:hover { color: var(--ink); }

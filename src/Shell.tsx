@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { UpdateIndicator } from "../shared/update.ts";
+import { SPARK } from "./ui/kit.tsx";
 
 export type View = "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
 
@@ -35,8 +36,6 @@ const GROUP: Record<View, string> = Object.fromEntries(
   NAV.flatMap((group) => group.items.map((item) => [item.id, group.label])),
 ) as Record<View, string>;
 
-/** The agent's mark: a four-pointed sparkle. */
-export const SPARK = "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 3v4M21 5h-4";
 const SUN = "M12 3v1M12 20v1M4.2 4.2l.7.7M19.1 19.1l.7.7M3 12h1M20 12h1M4.2 19.8l.7-.7M19.1 4.9l.7-.7M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0";
 const MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
 const LOGOUT = "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9";
@@ -89,6 +88,8 @@ type Props = {
   userName: string;
   employeeId: number;
   subtitle: string;
+  /** Small counters beside nav items (e.g. open tickets); zero or missing hides them. */
+  counts?: Partial<Record<View, number>>;
   query: string;
   onQuery: (query: string) => void;
   showSearch: boolean;
@@ -126,6 +127,7 @@ export function Shell(props: Props) {
                     <Icon d={item.icon} />
                   </span>
                   <span className="label">{item.label}</span>
+                  {props.counts?.[item.id] ? <span className="count">{props.counts[item.id]}</span> : null}
                 </button>
               ))}
             </div>
@@ -184,7 +186,6 @@ export function Shell(props: Props) {
             <span className="sep">/</span>
             <h1 className="title">{TITLES[props.view]}</h1>
           </div>
-          <span className="subtitle ellipsis">{props.subtitle}</span>
           <div className="topbar-right">
             {props.showSearch ? (
               <div className="search" onClick={() => document.getElementById("board-search")?.focus()}>
