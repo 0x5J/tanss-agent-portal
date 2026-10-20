@@ -338,6 +338,119 @@ Klick auf einen Balken filtert alles auf diese Facette. Die Ansicht liest nur �
 sie holt die Buchungen mit einem Aufruf über `GET /me/supports/range` und
 schreibt weder nach TANSS noch in den Store.
 
+## Webhooks
+
+Ein Webhook meldet einen Statuswechsel an ein anderes System, zum Beispiel an
+einen n8n-Workflow. Du legst ihn für dich an und hängst ihn an einzelne
+Tickets. Ändert sich der Status eines Tickets, schickt das Portal einen
+HTTP-POST an die Ziel-URL. Das gibt es nur im Portal: In TANSS wird nichts
+angelegt oder geändert, das Portal liest nur.
+
+**So benutzt du es.**
+
+1. **Einstellungen → Webhooks:** Webhook anlegen mit Name, Ziel-URL
+   (`http` oder `https`), optionalem Zielstatus-Filter (leer heißt: jeder
+   Wechsel), Vorlage und optionalem Geheimnis. „Testen" schickt ein Beispiel
+   mit erfundenen Daten und zeigt dir die Antwort.
+2. **Im Ticket** rechts unter „Webhooks" hängst du ihn an. „einmalig" löst die
+   Verknüpfung nach der ersten erfolgreichen Zustellung wieder. Der Abschnitt
+   erscheint erst, wenn du mindestens einen Webhook angelegt hast.
+3. **Protokoll** unter der Liste in den Einstellungen: Jede Zustellung mit
+   Ergebnis. Fehlgeschlagene schickst du mit „Erneut senden" noch einmal.
+
+Jeder Techniker sieht und benutzt nur seine eigenen Webhooks.
+
+**Grenzen.**
+
+- Das Portal prüft die Tickets alle 5 Minuten. Die Meldung kommt also bis zu
+  5 Minuten nach der Änderung.
+- Ändert sich der Status zweimal innerhalb eines Intervalls, kommt nur ein
+  Wechsel an, vom alten zum letzten Stand (A→C statt A→B und B→C).
+- Der Anlass („Mail von …", „Kommentar von …", „Zeitbuchung von …") wird aus
+  dem Ticketverlauf abgeleitet und ist eine Vermutung. Nur wenn du den Status
+  im Portal geändert hast, steht „Im Portal von … geändert" fest. Mail- und
+  Kommentartexte gehen nie mit, nur Art, Name und Zeit.
+- Geprüft wird nur, solange das Portal läuft und eine gültige TANSS-Sitzung
+  des Technikers besteht.
+- Weiterleitungen (Redirects) folgt das Portal nicht; sie zählen als Fehler.
+  Trage die endgültige URL ein.
+
+**Inhalt.** Die Vorlage ist standardmäßig `{{json}}`, das ganze Objekt:
+
+```json
+{
+  "ticket": { "id": 12345, "title": "Drucker offline", "url": "https://tanss.example.com/tickets/12345", "customer": "Beispiel GmbH" },
+  "status": { "old": { "id": 1, "name": "Neu" }, "new": { "id": 2, "name": "Erledigt" } },
+  "cause": { "derived": true, "kind": "mail", "by": "Max Mustermann", "at": "2026-10-20T08:12:00.000Z", "summary": "Mail von Max Mustermann um 10:12" },
+  "changedAt": "2026-10-20T08:15:00.000Z",
+  "technician": "Erika Beispiel",
+  "webhook": { "id": "…", "name": "n8n Status" },
+  "test": false
+}
+```
+
+Eigene Vorlagen müssen gültiges JSON ergeben. Platzhalter, die Text liefern,
+werden JSON-sicher eingesetzt und stehen deshalb in Anführungszeichen:
+`{"text": "{{ticket.title}} ist jetzt {{status.new}}"}`. Zahlen (`ticket.id`)
+setzt das Portal ohne Anführungszeichen ein.
+
+| Platzhalter | Inhalt |
+| --- | --- |
+| `{{ticket.id}}` | Ticketnummer |
+| `{{ticket.title}}` | Titel |
+| `{{ticket.url}}` | Link in TANSS (aus `TANSS_TICKET_URL`, sonst leer) |
+| `{{customer}}` | Kunde |
+| `{{status.old}}`, `{{status.new}}` | Name des alten und des neuen Status |
+| `{{cause.summary}}` | Anlass als Satz |
+| `{{cause.kind}}` | `mail`, `comment`, `support`, `portal` oder `unknown` |
+| `{{cause.by}}`, `{{cause.at}}` | Wer, und wann (ISO-Zeit) |
+| `{{changedAt}}` | Zeitpunkt der Erkennung (ISO-Zeit) |
+| `{{technician}}` | Techniker, dem der Webhook gehört |
+| `{{webhook.name}}` | Name des Webhooks |
+| `{{json}}` | das ganze Objekt oben |
+
+**Header.** Jeder Aufruf ist ein `POST` mit `Content-Type: application/json`
+und diesen Headern:
+
+- `X-Portal-Delivery`: ID der Zustellung. Bei Wiederholungen bleibt sie gleich;
+  damit kann der Empfänger Doppelte verwerfen. Zugestellt wird mindestens
+  einmal, nicht genau einmal.
+- `X-Portal-Timestamp`: Unix-Sekunden zum Zeitpunkt des Sendens.
+- `X-Portal-Signature: sha256=<hex>`: nur mit Geheimnis. Es ist der
+  HMAC-SHA256 über `"<timestamp>.<body>"` (Zeitstempel, Punkt, Rumpf genau so
+  wie gesendet) mit dem Geheimnis als Schlüssel.
+
+Prüfen in Node.js. `rawBody` ist der
+unveränderte Rumpf als Text, nicht das geparste und neu serialisierte JSON:
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verify(secret, headers, rawBody) {
+  const timestamp = headers["x-portal-timestamp"];
+  const given = headers["x-portal-signature"] ?? "";
+  // Alte Aufrufe abweisen, damit niemand einen mitgeschnittenen wiederholt.
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!(age <= 300)) return false;
+  const expected = "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+Ein Zeitfenster von 5 Minuten reicht. Wiederholungen tragen bei jedem Versuch
+einen neuen Zeitstempel und eine neue Signatur, aber dieselbe
+`X-Portal-Delivery`. Als Ziel eignet sich zum Beispiel
+`https://n8n.example.com/webhook/ticket-status`.
+
+**Wiederholungen.** Ein Aufruf hat 10 Sekunden Zeit; als Erfolg zählt jeder
+2xx-Code. Sonst versucht das Portal es nach 30 Sekunden und nach 2 Minuten
+noch einmal. Schlägt auch das fehl, steht die Zustellung im Protokoll als
+fehlgeschlagen, und du kannst sie mit „Erneut senden" anstoßen. Dieser neue
+Versuch trägt eine neue `X-Portal-Delivery`. Das Protokoll hält alle offenen
+Zustellungen und die letzten 200 abgeschlossenen.
+
 ## Was bewusst fehlt
 
 Risiko-Score und Linear/Git als Quellen des Agenten (Ausbaustufe 2).

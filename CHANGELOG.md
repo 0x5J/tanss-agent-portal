@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Webhooks bei Statuswechsel: In den Einstellungen („Webhooks") legst du Ziel,
+  Vorlage und optional ein Geheimnis an, im Ticket hängst du sie an (auf Wunsch
+  „einmalig"). Ändert sich der Status, ruft das Portal die URL auf – mit Anlass,
+  signiert, mit Wiederholungen und einem Protokoll samt „Erneut senden".
+
 ## [0.4.1] – 2026-10-20
 
 ### Hinzugefügt
