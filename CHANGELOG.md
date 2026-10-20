@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+## [0.4.2] – 2026-10-20
+
 ### Hinzugefügt
 
 - Webhooks bei Statuswechsel: In den Einstellungen („Webhooks") legst du Ziel,
@@ -136,7 +138,8 @@ Erste öffentliche Version.
 - Der gespeicherte LLM-API-Key geht nur noch an den gespeicherten Endpoint.
 - Abmelden macht alle Cookies des Kontos serverseitig ungültig, auch Kopien.
 
-[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.1...HEAD
+[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.2.0...v0.3.0
