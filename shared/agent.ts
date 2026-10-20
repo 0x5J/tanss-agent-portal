@@ -10,30 +10,6 @@ import type { ThreadEntry } from "./thread.ts";
 import { rowTone, type TicketRow } from "./tickets.ts";
 import { formatClock, type Support } from "./timeline.ts";
 
-/** A booking the agent suggests; executed only when a person approves it. */
-export type Proposal = {
-  id: string;
-  employeeId: number;
-  createdAt: number;
-  kind: "booking";
-  /** Why the agent thinks so, in one or two sentences. */
-  reason: string;
-  /** The traces it built on, as short lines. */
-  evidence: string[];
-  booking: {
-    date: string;
-    startMinute: number;
-    duration: number;
-    ticketId?: number;
-    ticketTitle: string;
-    companyId?: number;
-    companyName: string;
-    typeId: number;
-    location: "OFFICE" | "CUSTOMER" | "REMOTE";
-    text: string;
-  };
-};
-
 export const SYSTEM_PROMPT =
   "Du bist der Assistent eines IT-Systemhaus-Technikers und arbeitest mit dem Ticketsystem TANSS. " +
   "Antworte auf Deutsch, sachlich und knapp. Erfinde keine Fakten: alles, was du sagst, muss aus dem " +
@@ -317,63 +293,6 @@ export function parsePatterns(value: unknown, known: Set<number>): PatternGroup[
   return result;
 }
 
-/** One ticket the gap search may attribute the time to. */
-export type GapCandidate = {
-  ticket: TicketRow;
-  /** My comments that day, as "[HH:MM] text". */
-  comments: string[];
-};
-
-export type GapAnswer = {
-  ticketId: number | null;
-  text: string;
-  reason: string;
-};
-
-export function gapPrompt(
-  day: string,
-  start: number,
-  end: number,
-  candidates: GapCandidate[],
-  daySupports: Support[],
-): string {
-  const booked = daySupports
-    .filter((s) => berlinYmd(s.date) === day)
-    .sort((a, b) => a.date - b.date)
-    .map((s) => {
-      const from = berlinMinuteOfDay(s.date);
-      return `  ${formatClock(from)}–${formatClock(from + s.duration)} ${s.ticketId ? `#${s.ticketId} ` : ""}${s.companyName}: ${clip(s.text.split("\n")[0], 120)}`;
-    })
-    .join("\n");
-  const list = candidates
-    .map(
-      (c) =>
-        `  #${c.ticket.id} · ${c.ticket.companyName || "—"} · „${c.ticket.title}" · Status ${c.ticket.statusName || "—"}` +
-        (c.ticket.modified ? ` · geändert ${clockOf(c.ticket.modified, day)}` : "") +
-        (c.comments.length ? `\n    meine Kommentare: ${c.comments.map((x) => clip(x, 200)).join(" | ")}` : ""),
-    )
-    .join("\n");
-  return (
-    `Am ${formatShortDate(day)} ist zwischen ${formatClock(start)} und ${formatClock(end)} keine Leistung gebucht. ` +
-    "Entscheide anhand der Spuren unten, an welchem Ticket ich in dieser Zeit am wahrscheinlichsten gearbeitet habe, " +
-    "und formuliere einen Leistungstext für die Buchung (1–2 Sätze, Vergangenheitsform, fachlich). " +
-    "Gibt es keinen belastbaren Anhaltspunkt, setze ticketId auf null und erkläre das in reason. " +
-    'Antworte ausschließlich als JSON: {"ticketId":4711,"text":"…","reason":"…"}\n\n' +
-    `Bereits gebucht an dem Tag:\n${booked || "  nichts"}\n\n` +
-    `Eigene Tickets mit Spuren an dem Tag:\n${list || "  keine"}`
-  );
-}
-
-export function parseGapAnswer(value: unknown, candidates: Set<number>): GapAnswer {
-  const raw = (value as { ticketId?: unknown; text?: unknown; reason?: unknown } | null) ?? {};
-  const id = Number(raw.ticketId ?? 0);
-  return {
-    ticketId: Number.isInteger(id) && id > 0 && candidates.has(id) ? id : null,
-    text: String(raw.text ?? "").trim(),
-    reason: String(raw.reason ?? "").trim(),
-  };
-}
-
 // --- next step ---------------------------------------------------------------
 
 export type NextStep = { text: string; owner: string; statusName: string | null };
@@ -589,7 +508,7 @@ export const CHAT_SYSTEM_PROMPT =
   "Geht es um mehrere Tickets in einem Text, ordne nach Sache statt nach Ticket und nenne jede Ticketnummer " +
   "einmal, damit der Kunde zuordnen kann. " +
   "Du kannst nichts ausführen: keine Buchungen, keine Kommentare, keine Statusänderungen. Wenn der Nutzer so etwas " +
-  "möchte, sag, wo er es im Portal tut (Entwurf im Ticket, „Agent fragen“ an einer Lücke in Zeiten, Freigaben).";
+  "möchte, sag, wo er es im Portal tut (Entwurf im Ticket, Buchung in Zeiten).";
 
 export function chatContext(input: {
   today: string;
@@ -626,10 +545,6 @@ export function chatContext(input: {
 
 function dateLabel(unix: number): string {
   return `${formatShortDate(berlinYmd(unix))} ${formatClock(berlinMinuteOfDay(unix))}`;
-}
-
-function clockOf(unix: number, day: string): string {
-  return berlinYmd(unix) === day ? formatClock(berlinMinuteOfDay(unix)) : formatShortDate(berlinYmd(unix));
 }
 
 function clip(text: string, max: number): string {

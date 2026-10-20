@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import type { LlmSettings } from "./llm.ts";
-import { DEFAULT_CONTEXT_TOKENS, type Proposal } from "../shared/agent.ts";
+import { DEFAULT_CONTEXT_TOKENS } from "../shared/agent.ts";
 import { parseDashboardDays, type ClaimEntry, type DashboardDay } from "../shared/dashboard.ts";
 import { LIST_IDS, parseSavedViews, type SavedView } from "../shared/filters.ts";
 import { parseRoutines, type Routine } from "../shared/routines.ts";
@@ -9,7 +9,6 @@ import { DEFAULT_STYLE, parseStyle, type StyleSettings } from "../shared/style.t
 import { parseMappings, type Mappings } from "../shared/mapping.ts";
 import { DEFAULT_RULES, parseRules, type ImportRules } from "../shared/import.ts";
 
-export type { Proposal };
 
 /**
  * The one TANSS session the whole server shares: the browser's requests and
@@ -38,9 +37,6 @@ export type Store = {
   bumpSessionGeneration(employeeId: number): number;
   llm(): LlmSettings;
   setLlm(settings: LlmSettings): void;
-  proposals(employeeId: number): Proposal[];
-  addProposal(proposal: Proposal): void;
-  removeProposal(id: string): Proposal | null;
   /** Saved board lists, per employee — server-side so the poller can count them. */
   views(employeeId: number): SavedView[];
   setViews(employeeId: number, views: SavedView[]): void;
@@ -86,7 +82,6 @@ const EMPTY_LLM: LlmSettings = { baseUrl: "", apiKey: "", model: "", contextToke
 /** In-memory store for tests. */
 export function createMemoryStore(): Store {
   let llm = { ...EMPTY_LLM };
-  let proposals: Proposal[] = [];
   let session: StoredSession | null = null;
   const views = new Map<number, SavedView[]>();
   const templates = new Map<number, Record<string, number>>();
@@ -114,15 +109,6 @@ export function createMemoryStore(): Store {
     llm: () => ({ ...llm }),
     setLlm: (s) => {
       llm = { ...s };
-    },
-    proposals: (employeeId) => proposals.filter((p) => p.employeeId === employeeId),
-    addProposal: (p) => {
-      proposals = [...proposals, p];
-    },
-    removeProposal: (id) => {
-      const found = proposals.find((p) => p.id === id) ?? null;
-      proposals = proposals.filter((p) => p.id !== id);
-      return found;
     },
     views: (employeeId) => views.get(employeeId) ?? [],
     setViews: (employeeId, next) => {
@@ -180,13 +166,12 @@ export function createMemoryStore(): Store {
 }
 
 /**
- * JSON files under `dir`: `llm.json` (holds the API key — mode 600) and
- * `proposals.json`. Written atomically; small enough to rewrite whole.
+ * JSON files under `dir`, `llm.json` among them (holds the API key — mode
+ * 600). Written atomically; small enough to rewrite whole.
  */
 export function createFileStore(dir: string): Store {
   mkdirSync(dir, { recursive: true });
   const llmPath = path.join(dir, "llm.json");
-  const proposalsPath = path.join(dir, "proposals.json");
   const viewsPath = path.join(dir, "views.json");
   const dashboardPath = path.join(dir, "dashboard.json");
   const sessionPath = path.join(dir, "session.json");
@@ -229,7 +214,6 @@ export function createFileStore(dir: string): Store {
   }
 
   let llm: LlmSettings = { ...EMPTY_LLM, ...read<Partial<LlmSettings>>(llmPath, {}) };
-  let proposals = read<Proposal[]>(proposalsPath, []);
   const viewsByEmployee = read<Record<string, unknown>>(viewsPath, {});
   const views = new Map<number, SavedView[]>(
     Object.entries(viewsByEmployee).map(([id, raw]) => [Number(id), parseSavedViews(raw, LIST_IDS)]),
@@ -294,19 +278,6 @@ export function createFileStore(dir: string): Store {
     setLlm: (s) => {
       llm = { ...s };
       write(llmPath, llm, 0o600);
-    },
-    proposals: (employeeId) => proposals.filter((p) => p.employeeId === employeeId),
-    addProposal: (p) => {
-      proposals = [...proposals, p];
-      write(proposalsPath, proposals, 0o600);
-    },
-    removeProposal: (id) => {
-      const found = proposals.find((p) => p.id === id) ?? null;
-      if (found) {
-        proposals = proposals.filter((p) => p.id !== id);
-        write(proposalsPath, proposals, 0o600);
-      }
-      return found;
     },
     views: (employeeId) => views.get(employeeId) ?? [],
     setViews: (employeeId, next) => {

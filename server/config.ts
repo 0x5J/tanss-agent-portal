@@ -12,7 +12,7 @@ export type ServerConfig = {
   tanssTicketUrl: string;
   /** Token seed for the 2FA code. Null means the user types the code. */
   totp: TotpConfig | null;
-  /** Where the agent keeps its settings and proposals. */
+  /** Where the portal keeps its settings and state. */
   dataDir: string;
   /**
    * TANSS login of the portal user. When set (with TOTP_SECRET for 2FA), the

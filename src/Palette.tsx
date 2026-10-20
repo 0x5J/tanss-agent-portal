@@ -37,7 +37,6 @@ export function Palette(props: Props) {
   const jump: Item[] = [
     { group: "Springen", label: "Dashboard", hint: "G D", run: () => props.onView("dashboard") },
     { group: "Springen", label: "Tickets", hint: "G T", run: () => props.onView("tickets") },
-    { group: "Springen", label: "Freigaben", hint: "G F", run: () => props.onView("approvals") },
     { group: "Springen", label: "Zeiten", hint: "G Z", run: () => props.onView("times") },
     { group: "Springen", label: "Auswertung", hint: "G W", run: () => props.onView("analysis") },
     { group: "Springen", label: "Tagesimport", hint: "G I", run: () => props.onView("import") },

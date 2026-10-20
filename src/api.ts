@@ -20,11 +20,9 @@ export type ImportBookItem = {
 };
 import type { LogEntry } from "../shared/log.ts";
 import type { Activity } from "../shared/activity.ts";
-import type { BriefingFacts, ChatTurn, CompanyCheck, DraftIntent, NextStep, PatternGroup, Proposal, SimilarHit } from "../shared/agent.ts";
+import type { BriefingFacts, ChatTurn, CompanyCheck, DraftIntent, NextStep, PatternGroup, SimilarHit } from "../shared/agent.ts";
 import type { ClaimEntry, CollectorHealth, DashboardDay } from "../shared/dashboard.ts";
 import type { SavedView } from "../shared/filters.ts";
-
-export type { Proposal };
 
 export class ApiError extends Error {
   readonly status: number;
@@ -233,17 +231,11 @@ export const api = {
           context: { bookedMinutes: number; gaps: number; templates: number; patterns: number; routines: number };
         }
       >("POST", "/me/agent/assistant", { day, ...(focus ? { focus } : {}) }),
-    gap: (day: string, start: number, end: number) =>
-      request<{ proposal: Proposal | null; note: string }>("POST", "/me/agent/gap", { day, start, end }),
     chat: (payload: RowsPayload & { messages: ChatTurn[]; openTicketId: number | null }) =>
       request<{ text: string; ticketsRead: number[]; steps: { tool: string; arg: string; result: string; ok: boolean }[] }>(
         "POST",
         "/me/agent/chat",
         payload,
       ),
-    proposals: () => request<{ proposals: Proposal[] }>("GET", "/me/agent/proposals"),
-    approve: (id: string, edits: { text?: string; duration?: number; typeId?: number }) =>
-      request<{ ok: true; id: number }>("POST", `/me/agent/proposals/${id}/approve`, edits),
-    reject: (id: string) => request<{ ok: true }>("DELETE", `/me/agent/proposals/${id}`),
   },
 };

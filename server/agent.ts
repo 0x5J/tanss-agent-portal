@@ -1,12 +1,11 @@
 /**
- * The agent routes: settings for the local model, the five assistant
- * functions and the approval queue. The model only ever produces text; every
- * write to TANSS goes through a person's approval and the existing routes.
+ * The agent routes: settings for the local model and the assistant
+ * functions. The model only ever produces text; every write to TANSS is made
+ * by a person through the existing routes.
  */
-import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ACTIVITY_LOOKBACK_DAYS, historyActivity, type Activity } from "../shared/activity.ts";
+import { ACTIVITY_LOOKBACK_DAYS, type Activity } from "../shared/activity.ts";
 import {
   SYSTEM_PROMPT,
   CHAT_SYSTEM_PROMPT,
@@ -29,8 +28,6 @@ import {
   similarPrompt,
   stripMailNoise,
   draftPrompt,
-  gapPrompt,
-  parseGapAnswer,
   parsePatterns,
   patternsPrompt,
   summaryPrompt,
@@ -43,7 +40,6 @@ import {
   type CompanyCandidate,
   type CompanyCheck,
   type DraftIntent,
-  type GapCandidate,
   type PatternGroup,
 } from "../shared/agent.ts";
 import {
@@ -58,9 +54,9 @@ import {
   supportsText,
 } from "../shared/chat-tools.ts";
 import { buildThread, type ThreadEntry } from "../shared/thread.ts";
-import { berlinDayRangeUnix, berlinMinuteOfDay, berlinUnixAtMinute, berlinYmd, shiftYmd } from "../shared/days.ts";
+import { berlinDayRangeUnix, berlinYmd, shiftYmd } from "../shared/days.ts";
 import { matchesQuery, toTicketRow, type TicketRow } from "../shared/tickets.ts";
-import { buildBlocks, formatClock, supportsOfDay, sumMinutes, toSupport } from "../shared/timeline.ts";
+import { buildBlocks, supportsOfDay, sumMinutes, toSupport } from "../shared/timeline.ts";
 import {
   ASSISTANT_RULES,
   PATTERN_DAYS,
@@ -91,7 +87,7 @@ import {
   type ToolCall,
   type ToolDef,
 } from "./llm.ts";
-import type { Proposal, Store } from "./store.ts";
+import type { Store } from "./store.ts";
 import type { TanssClient, TanssSession } from "./tanss.ts";
 
 export type AgentDeps = {
@@ -109,10 +105,6 @@ export type AgentDeps = {
   linear?: LinearClient;
 };
 
-const LINK_TYPE_COMPANY = 2;
-const LINK_TYPE_TICKET = 11;
-/** Histories a gap search may read — one request each. */
-const GAP_MAX_HISTORIES = 12;
 const PATTERN_MAX_ROWS = 80;
 /** Ticket histories one chat turn may pull in. */
 const CHAT_MAX_TICKETS = 3;
@@ -247,12 +239,6 @@ const SIMILAR_MAX_CANDIDATES = 60;
 /** Companies the customer check offers the model to choose from. */
 const COMPANY_MAX_CANDIDATES = 10;
 
-const gapSchema = z.object({
-  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  start: z.number().int().min(0).max(24 * 60 - 1),
-  end: z.number().int().min(1).max(24 * 60),
-});
-
 const issueTextSchema = z.object({
   issue: z.string().trim().min(1).max(60),
   title: z.string().trim().max(300).default(""),
@@ -268,11 +254,6 @@ const assistantSchema = z.object({
     .optional(),
 });
 
-const approveSchema = z.object({
-  text: z.string().trim().min(1).max(20_000).optional(),
-  duration: z.number().int().positive().max(24 * 60).optional(),
-  typeId: z.number().int().positive().optional(),
-});
 
 export function maskKey(key: string): string {
   if (!key) return "";
@@ -766,90 +747,6 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
   });
 
   /**
-   * What was I doing in that gap? Own tickets touched that day plus my
-   * comments in them, then one booking proposal into the queue.
-   */
-  app.post("/me/agent/gap", async (request, reply) => {
-    const parsed = gapSchema.safeParse(request.body);
-    if (!parsed.success || parsed.data.end <= parsed.data.start) {
-      return reply.code(400).send({ error: "Lücke ungültig" });
-    }
-    const { day, start, end } = parsed.data;
-    return withSession(request, reply, async (session) => {
-      configured();
-      const range = berlinDayRangeUnix(day);
-      const [own, supportsRaw, types] = await Promise.all([
-        tanss.ticketList(session, "own"),
-        tanss.listSupports(session, range.from, range.to),
-        tanss.supportTypes(session),
-      ]);
-      const daySupports = supportsRaw.items.map((s) => toSupport(s, supportsRaw.linked));
-      const rows = own.items.map((item) => toTicketRow(item, own.linked, own.waitingStates));
-      // Touched that day first, then the most recently changed — bounded.
-      const touched = rows.filter((r) => r.modified && berlinYmd(r.modified) === day);
-      const others = rows.filter((r) => !touched.includes(r)).sort((a, b) => b.modified - a.modified);
-      const pool = [...touched, ...others].slice(0, GAP_MAX_HISTORIES);
-      const candidates = (
-        await mapPool(pool, 4, async (row): Promise<GapCandidate | null> => {
-          try {
-            const history = await tanss.ticketHistory(session, row.id);
-            const comments = (Array.isArray(history.content.comments) ? history.content.comments : [])
-              .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
-              .filter((c) => Number(c.employeeId) === session.employeeId && berlinYmd(Number(c.date ?? 0)) === day)
-              .sort((a, b) => Number(a.date) - Number(b.date))
-              .map((c) => `[${formatClock(berlinMinuteOfDay(Number(c.date)))}] ${String(c.content ?? "").trim()}`);
-            const activity = historyActivity(history.content);
-            // Only tickets with a trace that day or touched that day count.
-            if (comments.length === 0 && !touched.includes(row) && berlinYmd(activity.at) !== day) return null;
-            return { ticket: row, comments };
-          } catch {
-            return touched.includes(row) ? { ticket: row, comments: [] } : null;
-          }
-        })
-      ).filter((c): c is GapCandidate => c !== null);
-      if (candidates.length === 0) {
-        return { proposal: null, note: "Keine eigenen Tickets mit Spuren an diesem Tag gefunden." };
-      }
-      const answer = extractJson(await ask(gapPrompt(day, start, end, candidates, daySupports), { json: true, maxTokens: 500 }));
-      const result = parseGapAnswer(answer, new Set(candidates.map((c) => c.ticket.id)));
-      if (!result.ticketId || !result.text) {
-        return { proposal: null, note: result.reason || "Das Modell sieht keinen belastbaren Anhaltspunkt." };
-      }
-      const chosen = candidates.find((c) => c.ticket.id === result.ticketId)!;
-      const typeId = Number(types[0]?.id ?? 0);
-      if (!typeId) throw new LlmError("Keine Leistungsart verfügbar", 502);
-      const proposal: Proposal = {
-        id: randomBytes(6).toString("hex"),
-        employeeId: session.employeeId,
-        createdAt: now(),
-        kind: "booking",
-        reason: result.reason,
-        evidence: [
-          `Lücke ${formatClock(start)}–${formatClock(end)} am ${day.split("-").reverse().join(".")}`,
-          ...(chosen.ticket.modified && berlinYmd(chosen.ticket.modified) === day
-            ? [`#${chosen.ticket.id} an dem Tag geändert (${formatClock(berlinMinuteOfDay(chosen.ticket.modified))})`]
-            : []),
-          ...chosen.comments.slice(0, 3).map((c) => `Kommentar ${c.slice(0, 120)}`),
-        ],
-        booking: {
-          date: day,
-          startMinute: start,
-          duration: end - start,
-          ticketId: chosen.ticket.id,
-          ticketTitle: chosen.ticket.title,
-          companyId: chosen.ticket.companyId || undefined,
-          companyName: chosen.ticket.companyName,
-          typeId,
-          location: "REMOTE",
-          text: result.text,
-        },
-      };
-      store.addProposal(proposal);
-      return { proposal, note: "" };
-    });
-  });
-
-  /**
    * One chat turn, stateless: the board, today's bookings and the histories of
    * the tickets the question names go in as context. The model answers; it
    * cannot act.
@@ -1022,50 +919,6 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
           steps: [...openStep, ...result.steps],
         };
       }
-    });
-  });
-
-  // --- approval queue --------------------------------------------------------
-
-  app.get("/me/agent/proposals", async (request, reply) => {
-    return withSession(request, reply, async (session) => ({ proposals: store.proposals(session.employeeId) }));
-  });
-
-  app.post("/me/agent/proposals/:id/approve", async (request, reply) => {
-    const id = String((request.params as { id: string }).id);
-    const parsed = approveSchema.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "Änderung ungültig" });
-    return withSession(request, reply, async (session) => {
-      const proposal = store.proposals(session.employeeId).find((p) => p.id === id);
-      if (!proposal) return reply.code(404).send({ error: "Vorschlag nicht (mehr) vorhanden" });
-      const booking = { ...proposal.booking, ...parsed.data };
-      if (!booking.ticketId && !booking.companyId) return reply.code(400).send({ error: "Vorschlag ohne Ticket und Kunde" });
-      const payload: Record<string, unknown> = {
-        date: berlinUnixAtMinute(booking.date, booking.startMinute),
-        duration: booking.duration,
-        typeId: booking.typeId,
-        location: booking.location,
-        text: booking.text,
-        planningType: "SUPPORT",
-        employeeId: session.employeeId,
-        linkTypeId: booking.ticketId ? LINK_TYPE_TICKET : LINK_TYPE_COMPANY,
-        linkId: booking.ticketId ?? booking.companyId,
-      };
-      if (booking.ticketId) payload.ticketId = booking.ticketId;
-      if (booking.companyId) payload.companyId = booking.companyId;
-      const created = await tanss.createSupport(session, payload);
-      store.removeProposal(id);
-      return { ok: true, id: Number(created.id ?? 0) };
-    });
-  });
-
-  app.delete("/me/agent/proposals/:id", async (request, reply) => {
-    const id = String((request.params as { id: string }).id);
-    return withSession(request, reply, async (session) => {
-      const proposal = store.proposals(session.employeeId).find((p) => p.id === id);
-      if (!proposal) return reply.code(404).send({ error: "Vorschlag nicht (mehr) vorhanden" });
-      store.removeProposal(id);
-      return { ok: true };
     });
   });
 

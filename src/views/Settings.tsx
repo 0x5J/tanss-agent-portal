@@ -235,8 +235,8 @@ export function SettingsView(props: Props) {
         <span>· Tickets: Briefing und Muster über die sichtbaren Zeilen.</span>
         <span>· Ticket-Drawer: Thread zusammenfassen, Kommentar entwerfen.</span>
         <span>· Mehrfachauswahl: gemeinsamen Kommentar entwerfen.</span>
-        <span>· Zeiten: Lücke erklären → Buchungsvorschlag in den Freigaben.</span>
-        <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen in den Freigaben.</span>
+        <span>· Zeiten: Assistent schlägt vor, was in die Lücken des Tages passt.</span>
+        <span>Der Agent schreibt nie selbst nach TANSS. Entwürfe landen im Textfeld, Buchungen machst du selbst.</span>
       </div>
 
       <VersionSection onError={props.onError} onToast={props.onToast} onChecked={props.onUpdateOverview} />

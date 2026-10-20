@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyCheckSource, companyPickPrompt, parseCompanyPick, parseMentionedCompany, sameCompany, threadBudget, mentionedTicketIds, rowLine, parseGapAnswer, parsePatterns, searchTerms, stripMailNoise, ticketContext } from "./agent.ts";
+import { companyCheckSource, companyPickPrompt, parseCompanyPick, parseMentionedCompany, sameCompany, threadBudget, mentionedTicketIds, rowLine, parsePatterns, searchTerms, stripMailNoise, ticketContext } from "./agent.ts";
 import { extractJson, normalizeBaseUrl, stripThinking } from "../server/llm.ts";
 import type { TicketRow } from "./tickets.ts";
 import type { ThreadEntry } from "./thread.ts";
@@ -38,10 +38,6 @@ describe("answers", () => {
     expect(stripThinking("<think>hm</think>Hallo")).toBe("Hallo");
     expect(extractJson('Hier: ```json\n{"a":1}\n``` fertig')).toEqual({ a: 1 });
     expect(extractJson("nichts")).toBeNull();
-  });
-  it("validates the gap answer against the candidates", () => {
-    expect(parseGapAnswer({ ticketId: 5, text: "t", reason: "r" }, new Set([4]))).toEqual({ ticketId: null, text: "t", reason: "r" });
-    expect(parseGapAnswer({ ticketId: "4", text: "t" }, new Set([4])).ticketId).toBe(4);
   });
   it("keeps each ticket in one group only", () => {
     const groups = parsePatterns({ groups: [{ ticketIds: [1, 2] }, { ticketIds: [2, 3], reason: "x" }] }, new Set([1, 2, 3]));

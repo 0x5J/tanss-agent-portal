@@ -36,7 +36,6 @@ type Props = {
   onChanged: () => void;
   onOpen: (id: number) => void;
   agentReady: boolean;
-  onProposal: () => void;
   /** Which day to open at; today when nothing is given. */
   initialDay?: string;
 };
@@ -68,8 +67,6 @@ export function TimesView(props: Props) {
   }
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartHeight, setChartHeight] = useState(600);
-  const [asking, setAsking] = useState<number | null>(null);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
 
   /** Open an existing booking for changing — the lock reason comes with it. */
   async function edit(support: Support) {
@@ -92,25 +89,6 @@ export function TimesView(props: Props) {
       props.onError(error);
     } finally {
       setThinking(false);
-    }
-  }
-
-  async function askGap(start: number, end: number) {
-    setAsking(start);
-    try {
-      const result = await api.agent.gap(day, start, end);
-      if (result.proposal) {
-        const b = result.proposal.booking;
-        setAnswers((a) => ({ ...a, [start]: `Vorschlag in den Freigaben: #${b.ticketId} · ${b.text}` }));
-        props.onToast(`Buchungsvorschlag für #${b.ticketId} liegt in den Freigaben`);
-        props.onProposal();
-      } else {
-        setAnswers((a) => ({ ...a, [start]: result.note || "Kein Anhaltspunkt gefunden." }));
-      }
-    } catch (error) {
-      props.onError(error);
-    } finally {
-      setAsking(null);
     }
   }
 
@@ -155,7 +133,6 @@ export function TimesView(props: Props) {
 
   useEffect(() => {
     openDraft({ date: day });
-    setAnswers({});
     setIdeas(null);
     setNote("");
   }, [day]);
@@ -456,16 +433,7 @@ export function TimesView(props: Props) {
                       >
                         Vorschlag
                       </button>
-                      <button
-                        className="btn ghost small"
-                        disabled={!props.agentReady || asking !== null}
-                        title="Eigene Spuren des Tages prüfen und einen Buchungsvorschlag in die Freigaben legen"
-                        onClick={() => void askGap(gap.start, gap.end)}
-                      >
-                        {asking === gap.start ? "prüft …" : "Spuren"}
-                      </button>
                     </div>
-                    {answers[gap.start] ? <div className="gap-answer pretty">{answers[gap.start]}</div> : null}
                     {fitting.length ? (
                       <div className="row" style={{ gap: 5, flexWrap: "wrap", padding: "4px 10px 6px" }}>
                         <span className="tiny muted">Baustein:</span>
