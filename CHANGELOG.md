@@ -6,6 +6,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- Das Portal fragt stündlich statt alle sechs Stunden bei GitHub nach neuen
+  Versionen, das Update-Banner erscheint also schneller.
+
 ## [0.5.0] – 2026-10-20
 
 ### Hinzugefügt

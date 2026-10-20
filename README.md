@@ -150,7 +150,9 @@ Alle Einstellungen stehen in der `.env`; nach einer Änderung
 
 ## Updates
 
-Ist eine neuere Version freigegeben, zeigt das Portal ein Banner mit „Jetzt
+Das Portal fragt 10 Sekunden nach dem Start und danach stündlich bei GitHub
+nach neuen Versionen; „Jetzt prüfen“ in den Einstellungen fragt sofort. Ist
+eine neuere Version freigegeben, zeigt das Portal ein Banner mit „Jetzt
 aktualisieren". Der Klick beauftragt den **Updater**, einen zweiten Container
 neben dem Portal: Er zieht das neue Image, ersetzt den Portal-Container, wartet
 auf `/health` mit der neuen Version und stellt bei einem Fehler die alte Version

@@ -18,7 +18,9 @@ import {
 } from "../shared/update.ts";
 import type { ReleaseSource } from "./releases.ts";
 
-const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Hourly: one GitHub request per check stays far below the unauthenticated
+// rate limit (60 per hour and IP), even for several portals behind one address.
+const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_FIRST_CHECK_MS = 10_000;
 
 /** A refused update request; `status` is the HTTP status the route should answer with. */
