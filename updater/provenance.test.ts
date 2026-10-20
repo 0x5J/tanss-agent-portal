@@ -92,6 +92,8 @@ function deps(fetch: ProvenanceDeps["fetch"], trustedRoot = async () => ROOT): P
 
 const imageOpts = { source: "cli/cli", version: "2.0.0", digest: CLI_DIGEST, identity: CLI_IDENTITY };
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 describe("verifyImage", () => {
   it("asks the GitHub attestation API with the expected headers", async () => {
     const fetch = fakeFetch({ [API_URL]: list({ bundle: bundle() }) });
@@ -194,6 +196,35 @@ describe("verifyImage", () => {
     const fetch = fakeFetch({ [API_URL]: () => new Response(huge) });
     await expect(verifyImage(deps(fetch, trustedRoot), imageOpts)).rejects.toThrow(/zu groß/);
     expect(trustedRoot).not.toHaveBeenCalled();
+  });
+
+  it("requires the release identity of the version without the test seam", async () => {
+    const fetch = fakeFetch({ [API_URL]: list({ bundle: bundle() }) });
+    const release = "https://github.com/cli/cli/.github/workflows/release.yml@refs/tags/v2.0.0";
+    await expect(
+      verifyImage(deps(fetch), { source: "cli/cli", version: "2.0.0", digest: CLI_DIGEST }),
+    ).rejects.toThrow(new RegExp(`signiert von ${escapeRegExp(CLI_IDENTITY)} statt ${escapeRegExp(release)}$`));
+  });
+
+  it("skips a bundle_url that is not HTTPS and takes the next attestation", async () => {
+    const insecure = "http://blob.example/attestation.json.sn";
+    const fetch = fakeFetch({
+      [API_URL]: list({ bundle: null, bundle_url: insecure }, { bundle: bundle() }),
+      [insecure]: () => new Response(SNAPPY),
+    });
+    await expect(verifyImage(deps(fetch), imageOpts)).resolves.toBeUndefined();
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([API_URL]);
+  });
+
+  it.each([
+    ["an http URL", "http://blob.example/attestation.json.sn"],
+    ["an invalid URL", "not a url"],
+  ])("fails with only %s as bundle_url", async (_label, url) => {
+    const fetch = fakeFetch({ [API_URL]: list({ bundle: null, bundle_url: url }), [url]: () => new Response(SNAPPY) });
+    await expect(verifyImage(deps(fetch), imageOpts)).rejects.toThrow(
+      /kein gültiger Nachweis: Nachweis-Adresse ist kein HTTPS/,
+    );
+    expect(fetch.mock.calls.map(([u]) => u)).toEqual([API_URL]);
   });
 
   it("tries only the first 10 attestations", async () => {

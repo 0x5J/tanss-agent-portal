@@ -152,6 +152,9 @@ async function loadBundle(deps: ProvenanceDeps, attestation: unknown): Promise<u
   const a = attestation !== null && typeof attestation === "object" ? (attestation as Record<string, unknown>) : {};
   if (a.bundle !== null && typeof a.bundle === "object") return a.bundle;
   if (typeof a.bundle_url !== "string") throw new ProvenanceError("Nachweis hat unerwartetes Format");
+  if (!URL.canParse(a.bundle_url) || new URL(a.bundle_url).protocol !== "https:") {
+    throw new ProvenanceError("Nachweis-Adresse ist kein HTTPS");
+  }
 
   let bytes: Buffer;
   try {
@@ -214,7 +217,9 @@ export async function verifyImage(
 export function createImageVerifier(opts: { source: string }): (digest: string, version: string) => Promise<void> {
   const deps: ProvenanceDeps = {
     fetch: (input, init) => fetch(input, init),
-    trustedRoot: () => getTrustedRoot({ cachePath: join(tmpdir(), "sigstore-tuf") }),
+    // Explicit fetch bounds keep a slow TUF mirror from stretching the update's wait.
+    trustedRoot: () =>
+      getTrustedRoot({ cachePath: join(tmpdir(), "sigstore-tuf"), timeout: 5000, retry: { retries: 2 } }),
   };
   return (digest, version) => verifyImage(deps, { source: opts.source, version, digest });
 }
