@@ -468,7 +468,12 @@ function facetLabel(facet: Facet, byKey: Record<GroupKey, Group[]>): string {
  * view already holds — no second round trip to TANSS.
  */
 function downloadCsv(supports: Support[], range: Range, whose: string) {
-  const cell = (value: string) => (/[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+  const cell = (raw: string) => {
+    // Texts and customer names come from TANSS; one starting with = + - @ would run
+    // as a formula in Excel. Numbers stay numbers, everything else is forced to text.
+    const value = /^[=+\-@\t\r]/.test(raw) && !/^-?\d+([.,]\d+)?$/.test(raw) ? `'${raw}` : raw;
+    return /[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  };
   const header = ["Datum", "Beginn", "Dauer (min)", "Dauer (h)", "Ticket", "Kunde", "Art", "Ort", "Intern", "Nicht berechnet (min)", "Freigabe", "Text"];
   const lines = [...supports]
     .sort((a, b) => a.date - b.date)
