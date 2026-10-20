@@ -14,6 +14,7 @@ import {
   templateError,
   toPublic,
   type Delivery,
+  type ListedWebhook,
   type Webhook,
   type WebhookLink,
 } from "../shared/webhooks.ts";
@@ -55,6 +56,11 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
   const ticketIdOf = (request: FastifyRequest) => Number(idOf(request));
   const validTicket = (id: number) => Number.isInteger(id) && id > 0;
 
+  const listed = (employeeId: number, webhook: Webhook): ListedWebhook => ({
+    ...toPublic(webhook),
+    linkCount: store.webhookLinks(employeeId).filter((l) => l.webhookId === webhook.id).length,
+  });
+
   /**
    * The checked body, or the German reason it is refused. Optional fields stay
    * undefined when not sent; a blank template that is sent means "the default".
@@ -71,7 +77,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
 
   app.get("/me/webhooks", async (request, reply) => {
     const employeeId = await employee(request, reply);
-    return { webhooks: store.webhooks(employeeId).map(toPublic) };
+    return { webhooks: store.webhooks(employeeId).map((w) => listed(employeeId, w)) };
   });
 
   app.post("/me/webhooks", async (request, reply) => {
@@ -95,7 +101,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       active: data.active ?? true,
     };
     store.setWebhooks(employeeId, [...list, webhook]);
-    return { webhook: toPublic(webhook) };
+    return { webhook: listed(employeeId, webhook) };
   });
 
   app.put("/me/webhooks/:id", async (request, reply) => {
@@ -153,7 +159,7 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
         }),
       );
     }
-    return { webhook: toPublic(next) };
+    return { webhook: listed(employeeId, next) };
   });
 
   app.delete("/me/webhooks/:id", async (request, reply) => {

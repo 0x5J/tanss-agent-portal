@@ -21,6 +21,9 @@ export type Webhook = {
 /** What goes to the client: the secret stays on the server. */
 export type PublicWebhook = Omit<Webhook, "secret"> & { hasSecret: boolean };
 
+/** What the list shows: the public webhook plus how many tickets it hangs on. */
+export type ListedWebhook = PublicWebhook & { linkCount: number };
+
 export type WebhookLink = {
   webhookId: string;
   ticketId: number;

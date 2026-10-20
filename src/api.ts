@@ -8,7 +8,7 @@ import type { StyleSettings } from "../shared/style.ts";
 import type { ImportRules, Suggestion, WorkflowState } from "../shared/import.ts";
 import type { Target } from "../shared/mapping.ts";
 import type { UpdateOverview } from "../shared/update.ts";
-import type { Delivery, PublicWebhook, WebhookLink } from "../shared/webhooks.ts";
+import type { Delivery, ListedWebhook, WebhookLink } from "../shared/webhooks.ts";
 
 export type ImportBookItem = {
   issue: string;
@@ -111,6 +111,7 @@ export type WebhookInput = {
   statusFilter?: number[];
   template?: string;
   secret?: string;
+  /** Only the list's switch sends this; the form leaves it out. */
   active?: boolean;
 };
 /** A delivery as the log shows it: the body stays on the server. */
@@ -118,10 +119,10 @@ export type DeliveryRow = Omit<Delivery, "body">;
 
 export const api = {
   webhooks: {
-    list: () => request<{ webhooks: PublicWebhook[] }>("GET", "/me/webhooks"),
-    create: (input: WebhookInput) => request<{ webhook: PublicWebhook }>("POST", "/me/webhooks", input),
+    list: () => request<{ webhooks: ListedWebhook[] }>("GET", "/me/webhooks"),
+    create: (input: WebhookInput) => request<{ webhook: ListedWebhook }>("POST", "/me/webhooks", input),
     update: (id: string, input: WebhookInput) =>
-      request<{ webhook: PublicWebhook }>("PUT", `/me/webhooks/${encodeURIComponent(id)}`, input),
+      request<{ webhook: ListedWebhook }>("PUT", `/me/webhooks/${encodeURIComponent(id)}`, input),
     remove: (id: string) => request<{ ok: true }>("DELETE", `/me/webhooks/${encodeURIComponent(id)}`),
     test: (id: string) =>
       request<{ ok: boolean; status: number; error: string }>("POST", `/me/webhooks/${encodeURIComponent(id)}/test`, {}),

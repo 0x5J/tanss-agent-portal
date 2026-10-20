@@ -419,7 +419,7 @@ export function TicketDrawer(props: Props) {
             <Prop k="Erstellt" v={ticket ? dayAndClock(ticket.creationDate) : "—"} mono />
             <Prop k="Geändert" v={ticket ? dayAndClock(ticket.modified) : "—"} mono />
             <Prop k="Zeitsumme" v={formatHours(total)} mono />
-            <TicketWebhooks ticketId={ticketId} onError={onError} onToast={props.onToast} />
+            <TicketWebhooks key={ticketId} ticketId={ticketId} onError={onError} onToast={props.onToast} />
             {ticket?.estimatedMinutes ? <Prop k="Geschätzt" v={minutesLabel(ticket.estimatedMinutes)} mono /> : null}
           </aside>
         </div>

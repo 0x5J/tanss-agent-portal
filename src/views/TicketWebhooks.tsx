@@ -12,7 +12,8 @@ type Props = {
 /**
  * The webhooks hanging on this ticket, and a way to hang another one on it.
  * A technician without any webhook never sees this block, so it stays out of
- * the way for everyone who does not use the feature.
+ * the way for everyone who does not use the feature. Mounted with the ticket
+ * as its key, so an answer for the ticket just left never lands in the next.
  */
 export function TicketWebhooks(props: Props) {
   const { ticketId, onError, onToast } = props;
@@ -24,10 +25,6 @@ export function TicketWebhooks(props: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setWebhooks(null);
-    setLinks([]);
-    setPick("");
-    setOnce(false);
     Promise.all([api.webhooks.list(), api.webhooks.links(ticketId)])
       .then(([list, attached]) => {
         if (cancelled) return;
@@ -47,6 +44,8 @@ export function TicketWebhooks(props: Props) {
     return webhook ? [{ link: l, webhook }] : [];
   });
   const free = webhooks.filter((w) => w.active && !links.some((l) => l.webhookId === w.id));
+  // Nothing hangs here and nothing could: no reason to show the block.
+  if (attached.length === 0 && free.length === 0) return null;
   const chosen = free.some((w) => w.id === pick) ? pick : (free[0]?.id ?? "");
 
   async function attach() {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type DeliveryRow, type Meta, type WebhookInput } from "../api.ts";
 import { dayAndClock } from "../format.ts";
-import { DEFAULT_TEMPLATE, MAX_TEMPLATE_LENGTH, PLACEHOLDERS, type PublicWebhook } from "../../shared/webhooks.ts";
+import { DEFAULT_TEMPLATE, MAX_TEMPLATE_LENGTH, PLACEHOLDERS, type ListedWebhook } from "../../shared/webhooks.ts";
 import { CheckBox, Dot, SectionTitle, Switch } from "../ui/kit.tsx";
 
 type Props = {
@@ -20,7 +20,6 @@ type Form = {
   hadSecret: boolean;
   /** An existing secret is to be dropped on save. */
   dropSecret: boolean;
-  active: boolean;
 };
 
 const BLANK: Form = {
@@ -32,10 +31,9 @@ const BLANK: Form = {
   secret: "",
   hadSecret: false,
   dropSecret: false,
-  active: true,
 };
 
-function formOf(w: PublicWebhook): Form {
+function formOf(w: ListedWebhook): Form {
   return {
     id: w.id,
     name: w.name,
@@ -45,7 +43,6 @@ function formOf(w: PublicWebhook): Form {
     secret: "",
     hadSecret: w.hasSecret,
     dropSecret: false,
-    active: w.active,
   };
 }
 
@@ -63,7 +60,7 @@ function hostOf(url: string): string {
  */
 export function WebhooksSettings(props: Props) {
   const { onError, onToast } = props;
-  const [webhooks, setWebhooks] = useState<PublicWebhook[] | null>(null);
+  const [webhooks, setWebhooks] = useState<ListedWebhook[] | null>(null);
   const [states, setStates] = useState<Meta["states"]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRow[] | null>(null);
   const [form, setForm] = useState<Form | null>(null);
@@ -100,7 +97,7 @@ export function WebhooksSettings(props: Props) {
   }, [onError]);
 
   const stateName = (id: number) => states.find((s) => s.id === id)?.name ?? `Status ${id}`;
-  const filterText = (w: PublicWebhook) =>
+  const filterText = (w: ListedWebhook) =>
     w.statusFilter.length === 0 ? "jeder Wechsel" : w.statusFilter.map(stateName).join(", ");
 
   function open(next: Form) {
@@ -137,7 +134,6 @@ export function WebhooksSettings(props: Props) {
       url: form.url,
       statusFilter: form.statusFilter,
       template: form.template,
-      active: form.active,
     };
     if (form.secret) input.secret = form.secret;
     else if (form.dropSecret) input.secret = "";
@@ -155,15 +151,15 @@ export function WebhooksSettings(props: Props) {
       }
       setForm(null);
     } catch (error) {
-      // The server's reason belongs at the form; a lost connection is for the banner.
-      if (error instanceof ApiError && error.status >= 400 && error.status < 500) setFormError(error.message);
+      // Only a refused input belongs at the form; a dead session or a lost connection is for the banner.
+      if (error instanceof ApiError && (error.status === 400 || error.status === 409)) setFormError(error.message);
       else onError(error);
     } finally {
       setSaving(false);
     }
   }
 
-  async function setActive(w: PublicWebhook, active: boolean) {
+  async function setActive(w: ListedWebhook, active: boolean) {
     setBusy(w.id);
     try {
       const { webhook } = await api.webhooks.update(w.id, { name: w.name, url: w.url, active });
@@ -176,7 +172,7 @@ export function WebhooksSettings(props: Props) {
     }
   }
 
-  async function test(w: PublicWebhook) {
+  async function test(w: ListedWebhook) {
     setBusy(w.id);
     try {
       const result = await api.webhooks.test(w.id);
@@ -188,7 +184,7 @@ export function WebhooksSettings(props: Props) {
     }
   }
 
-  async function remove(w: PublicWebhook) {
+  async function remove(w: ListedWebhook) {
     if (!window.confirm(`Webhook „${w.name}“ löschen? Er wird auch von allen Tickets gelöst.`)) return;
     setBusy(w.id);
     try {
@@ -363,6 +359,7 @@ export function WebhooksSettings(props: Props) {
               <span className="small muted wh-meta">
                 {hostOf(w.url)} · {filterText(w)}
                 {w.hasSecret ? " · signiert" : ""}
+                {w.linkCount > 0 ? ` · ${w.linkCount} ${w.linkCount === 1 ? "Ticket" : "Tickets"}` : ""}
               </span>
             </div>
             <span className="state">
@@ -409,7 +406,7 @@ export function WebhooksSettings(props: Props) {
                     <span className="mono">{dayAndClock(d.createdAt)}</span>
                     <span className="ellipsis" title={d.url}>{d.webhookName}</span>
                     <span className="mono">#{d.ticketId}</span>
-                    <span className="ellipsis" title={`${d.statusOld} → ${d.statusNew}`}>
+                    <span className="wh-wrap">
                       {d.statusOld} → {d.statusNew}
                     </span>
                     <DeliveryResult d={d} />
@@ -436,14 +433,14 @@ function DeliveryResult({ d }: { d: DeliveryRow }) {
     return (
       <span className="wh-result" title={d.result || undefined}>
         <Dot tone="warn" />
-        wartet (Versuch {d.attempts + 1})
+        <span className="wh-nowrap">wartet (Versuch {d.attempts + 1})</span>
       </span>
     );
   }
   return (
     <span className="wh-result" title={d.result || undefined}>
       <Dot tone={d.state === "ok" ? "ok" : "danger"} />
-      <span className="ellipsis">{d.result || (d.state === "ok" ? "ok" : "fehlgeschlagen")}</span>
+      <span className="wh-wrap">{d.result || (d.state === "ok" ? "ok" : "fehlgeschlagen")}</span>
     </span>
   );
 }

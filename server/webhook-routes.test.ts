@@ -185,6 +185,28 @@ describe("webhook routes", () => {
     expect(unknown.json().error).toBe("Webhook nicht gefunden");
   });
 
+  it("lists how many tickets each webhook hangs on, counting only its own links", async () => {
+    const { login, call } = await setup();
+    const cookie = await login(7);
+    const a = (await call(cookie, "POST", "/me/webhooks", hookBody)).json().webhook;
+    const b = (await call(cookie, "POST", "/me/webhooks", { ...hookBody, name: "Zweiter" })).json().webhook;
+    expect(a.linkCount).toBe(0);
+    await call(cookie, "POST", "/me/tickets/42/webhooks", { webhookId: a.id, once: false });
+    await call(cookie, "POST", "/me/tickets/43/webhooks", { webhookId: a.id, once: true });
+    await call(cookie, "POST", "/me/tickets/42/webhooks", { webhookId: b.id, once: false });
+
+    const counts = Object.fromEntries(
+      (await call(cookie, "GET", "/me/webhooks")).json().webhooks.map((w: { name: string; linkCount: number }) => [w.name, w.linkCount]),
+    );
+    expect(counts).toEqual({ Teams: 2, Zweiter: 1 });
+    const updated = await call(cookie, "PUT", `/me/webhooks/${a.id}`, { name: "Teams", url: "https://hook.example/a" });
+    expect(updated.json().webhook.linkCount).toBe(2);
+
+    const other = await login(8);
+    const mine = (await call(other, "POST", "/me/webhooks", hookBody)).json().webhook;
+    expect(mine.linkCount).toBe(0);
+  });
+
   it("deleting a webhook releases its links", async () => {
     const { login, call, store } = await setup();
     const cookie = await login(7);
