@@ -8,6 +8,15 @@ import { parseRoutines, type Routine } from "../shared/routines.ts";
 import { DEFAULT_STYLE, parseStyle, type StyleSettings } from "../shared/style.ts";
 import { parseMappings, type Mappings } from "../shared/mapping.ts";
 import { DEFAULT_RULES, parseRules, type ImportRules } from "../shared/import.ts";
+import {
+  parseDeliveries,
+  parseLinks,
+  parseWebhooks,
+  trimDeliveries,
+  type Delivery,
+  type Webhook,
+  type WebhookLink,
+} from "../shared/webhooks.ts";
 
 
 /**
@@ -75,9 +84,21 @@ export type Store = {
   /** Dashboard measurements, per employee. */
   dashboard(employeeId: number): DashboardDay[];
   setDashboard(employeeId: number, days: DashboardDay[]): void;
+  /** Webhooks that fire on a status change, per employee. Hold secrets. */
+  webhooks(employeeId: number): Webhook[];
+  setWebhooks(employeeId: number, list: Webhook[]): void;
+  /** Which ticket is watched for which webhook. */
+  webhookLinks(employeeId: number): WebhookLink[];
+  setWebhookLinks(employeeId: number, list: WebhookLink[]): void;
+  /** Calls owed or made; finished ones are trimmed to the newest on write. */
+  webhookDeliveries(employeeId: number): Delivery[];
+  setWebhookDeliveries(employeeId: number, list: Delivery[]): void;
 };
 
 const EMPTY_LLM: LlmSettings = { baseUrl: "", apiKey: "", model: "", contextTokens: DEFAULT_CONTEXT_TOKENS };
+
+/** Deep copy, so neither side of the store can change the other's data. */
+const copy = <T>(list: T[]): T[] => structuredClone(list);
 
 /** In-memory store for tests. */
 export function createMemoryStore(): Store {
@@ -95,6 +116,9 @@ export function createMemoryStore(): Store {
   const reportLists = new Map<number, string[]>();
   const reports = new Map<number, Map<string, string>>();
   const generations = new Map<number, number>();
+  const webhooks = new Map<number, Webhook[]>();
+  const webhookLinks = new Map<number, WebhookLink[]>();
+  const webhookDeliveries = new Map<number, Delivery[]>();
   return {
     session: () => (session ? { ...session } : null),
     setSession: (s) => {
@@ -161,6 +185,18 @@ export function createMemoryStore(): Store {
     dashboard: (employeeId) => dashboards.get(employeeId) ?? [],
     setDashboard: (employeeId, days) => {
       dashboards.set(employeeId, days);
+    },
+    webhooks: (employeeId) => copy(webhooks.get(employeeId) ?? []),
+    setWebhooks: (employeeId, list) => {
+      webhooks.set(employeeId, copy(list));
+    },
+    webhookLinks: (employeeId) => copy(webhookLinks.get(employeeId) ?? []),
+    setWebhookLinks: (employeeId, list) => {
+      webhookLinks.set(employeeId, copy(list));
+    },
+    webhookDeliveries: (employeeId) => copy(webhookDeliveries.get(employeeId) ?? []),
+    setWebhookDeliveries: (employeeId, list) => {
+      webhookDeliveries.set(employeeId, copy(trimDeliveries(list)));
     },
   };
 }
@@ -251,6 +287,21 @@ export function createFileStore(dir: string): Store {
   const dashboardsByEmployee = read<Record<string, unknown>>(dashboardPath, {});
   const dashboards = new Map<number, DashboardDay[]>(
     Object.entries(dashboardsByEmployee).map(([id, raw]) => [Number(id), parseDashboardDays(raw)]),
+  );
+  const webhooksPath = path.join(dir, "webhooks.json");
+  const webhooks = new Map<number, Webhook[]>(
+    Object.entries(read<Record<string, unknown>>(webhooksPath, {})).map(([id, raw]) => [Number(id), parseWebhooks(raw)]),
+  );
+  const webhookLinksPath = path.join(dir, "webhook-links.json");
+  const webhookLinks = new Map<number, WebhookLink[]>(
+    Object.entries(read<Record<string, unknown>>(webhookLinksPath, {})).map(([id, raw]) => [Number(id), parseLinks(raw)]),
+  );
+  const webhookDeliveriesPath = path.join(dir, "webhook-deliveries.json");
+  const webhookDeliveries = new Map<number, Delivery[]>(
+    Object.entries(read<Record<string, unknown>>(webhookDeliveriesPath, {})).map(([id, raw]) => [
+      Number(id),
+      parseDeliveries(raw),
+    ]),
   );
   const asRecord = <T>(map: Map<number, T>) => Object.fromEntries([...map.entries()].map(([k, v]) => [String(k), v]));
   let session = readSession();
@@ -397,6 +448,21 @@ export function createFileStore(dir: string): Store {
     setDashboard: (employeeId, days) => {
       dashboards.set(employeeId, days);
       write(dashboardPath, asRecord(dashboards), 0o600);
+    },
+    webhooks: (employeeId) => copy(webhooks.get(employeeId) ?? []),
+    setWebhooks: (employeeId, list) => {
+      webhooks.set(employeeId, copy(list));
+      write(webhooksPath, asRecord(webhooks), 0o600);
+    },
+    webhookLinks: (employeeId) => copy(webhookLinks.get(employeeId) ?? []),
+    setWebhookLinks: (employeeId, list) => {
+      webhookLinks.set(employeeId, copy(list));
+      write(webhookLinksPath, asRecord(webhookLinks), 0o600);
+    },
+    webhookDeliveries: (employeeId) => copy(webhookDeliveries.get(employeeId) ?? []),
+    setWebhookDeliveries: (employeeId, list) => {
+      webhookDeliveries.set(employeeId, copy(trimDeliveries(list)));
+      write(webhookDeliveriesPath, asRecord(webhookDeliveries), 0o600);
     },
   };
 }
