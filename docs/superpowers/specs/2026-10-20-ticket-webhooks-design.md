@@ -94,8 +94,8 @@ Konfiguration nach TANSS schreiben).
   **„Webhooks“** – **nur sichtbar, wenn der Techniker mindestens einen Webhook
   angelegt hat.** Sonst nichts, auch kein Platzhalter.
 - Dort: angehängte Webhooks mit Lösen-Button, eine Auswahl zum Anhängen, ein
-  Häkchen **„einmalig“** (löst den Webhook nach dem ersten tatsächlich
-  gesendeten Aufruf vom Ticket).
+  Häkchen **„einmalig“** (löst den Webhook vom Ticket, sobald der erste
+  Aufruf angestoßen ist).
 - Beim Anhängen merkt sich der Server den aktuellen Status des Tickets als
   Ausgangsstand, damit nichts sofort feuert.
 
@@ -159,8 +159,10 @@ Anlass im Verlauf gefunden“.
   beliebig vielen Tickets hängen.
 - **Wiederholung:** Zeitlimit 10 s pro Aufruf; als Erfolg zählt jeder 2xx-Code.
   Bei Fehler zwei automatische Wiederholungen (nach etwa 30 s und 2 min), danach
-  bleibt der Eintrag als fehlgeschlagen im Protokoll. „Einmalig“ löst erst nach
-  einem *erfolgreichen* Versand.
+  bleibt der Eintrag als fehlgeschlagen im Protokoll. „Einmalig“ löst die
+  Verknüpfung, sobald der erste Aufruf in die Warteschlange kommt (so entsteht
+  kein zweiter); ein fehlgeschlagener bleibt im Protokoll und lässt sich erneut
+  senden.
 - **Protokoll** hält die letzten 200 Einträge pro Techniker.
 - **Inaktiver Webhook** bleibt an seinen Tickets hängen, wird aber nicht geprüft
   und sendet nicht; beim Reaktivieren gilt der Punkt „Reaktivieren“ unten.

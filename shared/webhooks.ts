@@ -81,7 +81,8 @@ const records = (raw: unknown): Record<string, unknown>[] =>
 export function isHttpUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:";
+    // fetch refuses a URL with credentials, so every call to one would fail.
+    return (u.protocol === "http:" || u.protocol === "https:") && !u.username && !u.password;
   } catch {
     return false;
   }

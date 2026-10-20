@@ -79,7 +79,7 @@
 .wh-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 8px 4px; }
 .wh-log .thead.wh-row { padding-top: 0; padding-bottom: 0; }
 .wh-row .wh-act { display: flex; justify-content: flex-end; }
-.wh-wrap { overflow-wrap: anywhere; min-width: 0; }
+.wh-wrap { overflow-wrap: break-word; min-width: 0; }
 .wh-nowrap { white-space: nowrap; }
 .wh-result { display: inline-flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .wh-result .dot { margin-top: 6px; }

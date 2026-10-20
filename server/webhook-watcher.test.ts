@@ -341,9 +341,8 @@ describe("webhook watcher", () => {
     expect(store.webhookLinks(7)[0].lastStatusId).toBe(3);
   });
 
-  it("flush sends, retries, and once unlinks on success", async () => {
+  it("flush sends and retries", async () => {
     const { store, watcher, seen, clock } = setup({
-      links: [link({ once: true })],
       webhooks: [hook({ secret: "geheim" })],
       statuses: [500, 204],
     });
@@ -365,7 +364,85 @@ describe("webhook watcher", () => {
     expect(seen).toHaveLength(2);
     expect(header(seen[1].init, "X-Portal-Delivery")).toBe(header(seen[0].init, "X-Portal-Delivery"));
     expect(deliveries(store)[0]).toMatchObject({ state: "ok", attempts: 2, result: "204" });
-    expect(store.webhookLinks(7)).toEqual([]);
+    expect(store.webhookLinks(7)).toHaveLength(1);
+  });
+
+  describe("einmalig", () => {
+    // The ticket moves 2 -> 3 on the first pass, then on to the status in `now`.
+    function moving(statuses: number[]) {
+      const seq = [...statuses];
+      let last = seq[0];
+      return {
+        ticketById: async (_s: TanssSession, id: number) => {
+          last = seq.shift() ?? last;
+          return {
+            item: { id, title: "Drucker streikt", statusId: last, companyId: 5, creationDate: 1 },
+            linked: { ticketStates: { "2": { name: "Neu" }, "3": { name: "Erledigt" }, "4": { name: "Offen" } }, companies: { "5": { name: "Kunde GmbH" } } },
+          };
+        },
+      };
+    }
+
+    it("ends the link when the call is queued, so a second change queues no second call", async () => {
+      const { store, watcher, seen, clock } = setup({ links: [link({ once: true })], tanss: moving([3, 4]) });
+      await watcher.check();
+      expect(store.webhookLinks(7)).toEqual([]);
+      expect(deliveries(store)).toHaveLength(1);
+      clock.now += 300;
+      await watcher.check();
+      expect(deliveries(store)).toHaveLength(1);
+      await watcher.flush();
+      expect(seen).toHaveLength(1);
+    });
+
+    it("keeps a failed final call in the log, and resending it unlinks nothing", async () => {
+      const { store, watcher, seen, clock } = setup({ links: [link({ once: true })], statuses: [500, 500, 500] });
+      await watcher.check();
+      for (let i = 0; i < 3; i++) {
+        await watcher.flush();
+        clock.now += 200;
+      }
+      const failed = deliveries(store)[0];
+      expect(failed).toMatchObject({ state: "failed", once: true });
+      // The user attaches the same webhook again, then resends the old call.
+      store.setWebhookLinks(7, [link({ once: true, lastStatusId: 3, lastStatusName: "Erledigt" })]);
+      const copy = watcher.resend(7, failed.id);
+      expect(copy?.once).toBe(false);
+      await watcher.flush();
+      expect(seen).toHaveLength(4);
+      expect(store.webhookLinks(7)).toHaveLength(1);
+    });
+
+    it("a repeated detection after a crash still ends the link", async () => {
+      const { store, watcher } = setup({ links: [link({ once: true })] });
+      await watcher.check();
+      const [queued] = deliveries(store);
+      // The crash window: the call is queued, the link is back with its old baseline.
+      store.setWebhookLinks(7, [link({ once: true })]);
+      await watcher.check();
+      expect(deliveries(store)).toEqual([queued]);
+      expect(store.webhookLinks(7)).toEqual([]);
+    });
+
+    it("a status the filter ignores leaves the link in place", async () => {
+      const { store, watcher } = setup({ links: [link({ once: true })], webhooks: [hook({ statusFilter: [4] })] });
+      await watcher.check();
+      expect(deliveries(store)).toEqual([]);
+      expect(store.webhookLinks(7)).toHaveLength(1);
+    });
+  });
+
+  it("an item without a status is unreadable for the pass: no call, link unchanged", async () => {
+    const { store, watcher, calls } = setup({
+      tanss: {
+        ticketById: async (_s: TanssSession, id: number) => ({ item: { id } as never, linked: {} as never }),
+      },
+    });
+    const before = store.webhookLinks(7);
+    await watcher.check();
+    expect(deliveries(store)).toEqual([]);
+    expect(store.webhookLinks(7)).toEqual(before);
+    expect(calls.some((c) => c.name === "ticketHistory")).toBe(false);
   });
 
   it("a changed webhook URL takes effect for pending deliveries", async () => {

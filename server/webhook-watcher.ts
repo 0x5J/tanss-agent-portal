@@ -146,7 +146,11 @@ export function createWebhookWatcher(opts: {
 
     const at = seconds();
     const current = statusOf(ticket.item, ticket.linked);
+    // An empty answer (no status at all) is not a change to "status 0": unreadable for this pass.
+    if (!(current.statusId > 0)) return;
     const changed = links.filter((l) => l.lastStatusId !== current.statusId);
+    /** "einmalig" links that have a call on its way (or already had one for this change): they end here. */
+    const spent = new Set<string>();
     if (changed.length > 0) {
       const windowStart = Math.min(...links.map((l) => l.checkedAt));
       const history = await tanss.ticketHistory(session, ticketId);
@@ -157,13 +161,18 @@ export function createWebhookWatcher(opts: {
       const portal = mark !== undefined && mark > windowStart && mark <= at ? { at: mark, by: name } : undefined;
       const cause = deriveCause(thread, windowStart, at, portal);
 
-      const known = new Set(store.webhookDeliveries(employeeId).map((d) => d.key));
+      const known = new Map(store.webhookDeliveries(employeeId).map((d) => [d.key, d]));
       const queued: Delivery[] = [];
       for (const l of changed) {
         const w = hooks.get(l.webhookId)!;
         if (!matchesFilter(w, current.statusId)) continue;
         const key = `${w.id}|${ticketId}|${l.lastStatusId}>${current.statusId}|${l.checkedAt}`;
-        if (known.has(key)) continue;
+        const earlier = known.get(key);
+        if (earlier) {
+          // A repeated detection after a crash: the call exists, the link still has to end.
+          if (l.once && earlier.body) spent.add(l.webhookId);
+          continue;
+        }
         const payload: WebhookPayload = {
           ticket: {
             id: ticketId,
@@ -194,6 +203,7 @@ export function createWebhookWatcher(opts: {
         try {
           const body = renderTemplate(w.template, payload);
           queued.push({ ...base, id: newId(), body, createdAt: at, attempts: 0, nextAttemptAt: at, state: "pending", result: "", finishedAt: 0 });
+          if (l.once) spent.add(l.webhookId);
         } catch (error) {
           queued.push(finished({ ...base, body: "" }, at, error instanceof Error ? error.message : "Vorlage ungültig"));
         }
@@ -202,12 +212,19 @@ export function createWebhookWatcher(opts: {
       // detection, and the key above turns the repeat into a no-op.
       addDeliveries(employeeId, queued);
     }
-    updateLinks(employeeId, links, (l) => ({
-      ...l,
-      lastStatusId: current.statusId,
-      lastStatusName: current.statusName,
-      checkedAt: at,
-    }));
+    // A "once" link ends when its call is queued, not when it succeeds: a second
+    // change meanwhile must not queue a second call. A failed call stays in the
+    // log and can be sent again from there.
+    updateLinks(employeeId, links, (l) =>
+      spent.has(l.webhookId)
+        ? null
+        : {
+            ...l,
+            lastStatusId: current.statusId,
+            lastStatusName: current.statusName,
+            checkedAt: at,
+          },
+    );
     // Only the mark this pass could have used; one set while it ran is for the next change.
     const latest = portalMarks.get(markKey(employeeId, ticketId));
     if (changed.length > 0 && latest !== undefined && latest <= at) portalMarks.delete(markKey(employeeId, ticketId));
@@ -289,12 +306,6 @@ export function createWebhookWatcher(opts: {
             employeeId,
             store.webhookDeliveries(employeeId).map((x) => (x.id === id ? next : x)),
           );
-          if (next.state === "ok" && next.once) {
-            store.setWebhookLinks(
-              employeeId,
-              store.webhookLinks(employeeId).filter((l) => !sameLink(l, next)),
-            );
-          }
         } catch {
           // Saving failed; the delivery stays pending and goes out again.
         }
@@ -356,6 +367,8 @@ export function createWebhookWatcher(opts: {
         // flush sends to the current URL anyway; the log should say so from the start.
         url: current?.url ?? original.url,
         id: newId(),
+        // A resend never unlinks anything.
+        once: false,
         createdAt: at,
         attempts: 0,
         nextAttemptAt: at,

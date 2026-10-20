@@ -351,9 +351,11 @@ angelegt oder geändert, das Portal liest nur.
 1. **Einstellungen → Webhooks:** Webhook anlegen mit Name, Ziel-URL
    (`http` oder `https`), optionalem Zielstatus-Filter (leer heißt: jeder
    Wechsel), Vorlage und optionalem Geheimnis. „Testen" schickt ein Beispiel
-   mit erfundenen Daten und zeigt dir die Antwort.
+   mit erfundenen Daten und zeigt dir den Statuscode oder den Fehler (nicht die
+   Antwort des Empfängers).
 2. **Im Ticket** rechts unter „Webhooks" hängst du ihn an. „einmalig" löst die
-   Verknüpfung nach der ersten erfolgreichen Zustellung wieder. Der Abschnitt
+   Verknüpfung, sobald der erste Aufruf angestoßen ist; schlägt er fehl, steht er
+   im Protokoll und lässt sich von dort noch einmal senden. Der Abschnitt
    erscheint erst, wenn du mindestens einen Webhook angelegt hast.
 3. **Protokoll** unter der Liste in den Einstellungen: Jede Zustellung mit
    Ergebnis. Fehlgeschlagene schickst du mit „Erneut senden" noch einmal.
@@ -379,7 +381,7 @@ Jeder Techniker sieht und benutzt nur seine eigenen Webhooks.
 
 ```json
 {
-  "ticket": { "id": 12345, "title": "Drucker offline", "url": "https://tanss.example.com/tickets/12345", "customer": "Beispiel GmbH" },
+  "ticket": { "id": 12345, "title": "Drucker offline", "url": "https://tanss.example.com/index.php?section=bug&sub=view&bugID=12345", "customer": "Beispiel GmbH" },
   "status": { "old": { "id": 1, "name": "Neu" }, "new": { "id": 2, "name": "Erledigt" } },
   "cause": { "derived": true, "kind": "mail", "by": "Max Mustermann", "at": "2026-10-20T08:12:00.000Z", "summary": "Mail von Max Mustermann um 10:12" },
   "changedAt": "2026-10-20T08:15:00.000Z",
@@ -390,15 +392,17 @@ Jeder Techniker sieht und benutzt nur seine eigenen Webhooks.
 ```
 
 Eigene Vorlagen müssen gültiges JSON ergeben. Platzhalter, die Text liefern,
-werden JSON-sicher eingesetzt und stehen deshalb in Anführungszeichen:
+setzt das Portal JSON-sicher maskiert ein, aber ohne Anführungszeichen. Die
+setzt du selbst um den Platzhalter:
 `{"text": "{{ticket.title}} ist jetzt {{status.new}}"}`. Zahlen (`ticket.id`)
-setzt das Portal ohne Anführungszeichen ein.
+setzt das Portal ohne Anführungszeichen ein. Beim Speichern lehnt das Portal
+unbekannte Platzhalter ab, ebenso eine Vorlage, die kein gültiges JSON ergibt.
 
 | Platzhalter | Inhalt |
 | --- | --- |
 | `{{ticket.id}}` | Ticketnummer |
 | `{{ticket.title}}` | Titel |
-| `{{ticket.url}}` | Link in TANSS (aus `TANSS_TICKET_URL`, sonst leer) |
+| `{{ticket.url}}` | Link in TANSS wie „In TANSS öffnen" (aus `TANSS_TICKET_URL`, sonst aus `TANSS_BASE_URL` abgeleitet) |
 | `{{customer}}` | Kunde |
 | `{{status.old}}`, `{{status.new}}` | Name des alten und des neuen Status |
 | `{{cause.summary}}` | Anlass als Satz |
@@ -445,8 +449,8 @@ einen neuen Zeitstempel und eine neue Signatur, aber dieselbe
 `https://n8n.example.com/webhook/ticket-status`.
 
 **Wiederholungen.** Ein Aufruf hat 10 Sekunden Zeit; als Erfolg zählt jeder
-2xx-Code. Sonst versucht das Portal es nach 30 Sekunden und nach 2 Minuten
-noch einmal. Schlägt auch das fehl, steht die Zustellung im Protokoll als
+2xx-Code. Sonst versucht das Portal es frühestens nach 30 Sekunden bzw.
+2 Minuten noch einmal. Schlägt auch das fehl, steht die Zustellung im Protokoll als
 fehlgeschlagen, und du kannst sie mit „Erneut senden" anstoßen. Dieser neue
 Versuch trägt eine neue `X-Portal-Delivery`. Das Protokoll hält alle offenen
 Zustellungen und die letzten 200 abgeschlossenen.

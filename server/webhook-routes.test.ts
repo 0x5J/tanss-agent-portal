@@ -131,6 +131,8 @@ describe("webhook routes", () => {
     expect((await post({ ...hookBody, name: "x".repeat(81) })).statusCode).toBe(400);
     expect((await post({ ...hookBody, url: "ftp://hook.example" })).statusCode).toBe(400);
     expect((await post({ ...hookBody, url: "kein url" })).statusCode).toBe(400);
+    expect((await post({ ...hookBody, url: "https://user:pass@hook.example/a" })).statusCode).toBe(400);
+    expect((await post({ ...hookBody, url: "https://user@hook.example/a" })).statusCode).toBe(400);
     expect((await post({ ...hookBody, statusFilter: [1.5] })).statusCode).toBe(400);
     expect((await post({ ...hookBody, secret: "s".repeat(201) })).statusCode).toBe(400);
     const badTemplate = await post({ ...hookBody, template: "{{gibtsnicht}}" });
@@ -271,6 +273,31 @@ describe("webhook routes", () => {
     expect(resent.json().delivery.id).not.toBe("a");
     expect(store.webhookDeliveries(7)).toHaveLength(4);
     expect((await call(cookie, "POST", "/me/webhooks/deliveries/zzz/resend")).statusCode).toBe(404);
+  });
+
+  it("marks only finished deliveries with a body as resendable, and refuses to resend a pending one", async () => {
+    const { login, call, store } = await setup();
+    const cookie = await login(7);
+    const base: Delivery = {
+      id: "ok", key: "k1", webhookId: "w", webhookName: "Teams", url: "https://hook.example/a", ticketId: 1,
+      statusOld: "Neu", statusNew: "Erledigt", body: '{"x":1}', once: false, createdAt: 500, attempts: 1, nextAttemptAt: 100,
+      state: "ok", result: "204", finishedAt: 100,
+    };
+    store.setWebhookDeliveries(7, [
+      base,
+      { ...base, id: "pending", key: "k2", createdAt: 400, state: "pending", finishedAt: 0 },
+      { ...base, id: "gone", key: "k3", createdAt: 300, body: "", state: "failed", attempts: 0, result: "Ticket nicht mehr abrufbar – Verknüpfung entfernt" },
+      { ...base, id: "failed", key: "k4", createdAt: 200, state: "failed", result: "HTTP 500" },
+    ]);
+    const list = (await call(cookie, "GET", "/me/webhooks/deliveries")).json().deliveries as (Delivery & { resendable: boolean })[];
+    expect(Object.fromEntries(list.map((d) => [d.id, d.resendable]))).toEqual({ ok: true, pending: false, gone: false, failed: true });
+    expect(list.every((d) => !("body" in d))).toBe(true);
+
+    const running = await call(cookie, "POST", "/me/webhooks/deliveries/pending/resend");
+    expect(running.statusCode).toBe(409);
+    expect(running.json().error).toBe("Diese Zustellung läuft noch");
+    expect((await call(cookie, "POST", "/me/webhooks/deliveries/gone/resend")).statusCode).toBe(404);
+    expect(store.webhookDeliveries(7)).toHaveLength(4);
   });
 
   it("sends a test call", async () => {

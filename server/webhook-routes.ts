@@ -189,15 +189,21 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
     const deliveries = store
       .webhookDeliveries(employeeId)
       .sort((a, b) => b.createdAt - a.createdAt)
-      .map(withoutBody);
+      // Only a finished call that still has its body can be sent again.
+      .map((d) => ({ ...withoutBody(d), resendable: d.state !== "pending" && d.body !== "" }));
     return { deliveries };
   });
 
   app.post("/me/webhooks/deliveries/:id/resend", async (request, reply) => {
     const employeeId = await employee(request, reply);
-    const delivery = watcher.resend(employeeId, idOf(request));
+    const id = idOf(request);
+    // A second copy of a call that is still on its way would defeat the receiver's dedupe.
+    if (store.webhookDeliveries(employeeId).find((d) => d.id === id)?.state === "pending") {
+      return reply.code(409).send({ error: "Diese Zustellung läuft noch" });
+    }
+    const delivery = watcher.resend(employeeId, id);
     if (!delivery) return reply.code(404).send({ error: NO_DELIVERY });
-    return { delivery: withoutBody(delivery) };
+    return { delivery: { ...withoutBody(delivery), resendable: false } };
   });
 
   // --- on a ticket -----------------------------------------------------------

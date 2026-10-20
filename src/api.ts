@@ -115,7 +115,10 @@ export type WebhookInput = {
   active?: boolean;
 };
 /** A delivery as the log shows it: the body stays on the server. */
-export type DeliveryRow = Omit<Delivery, "body">;
+export type DeliveryRow = Omit<Delivery, "body"> & {
+  /** Finished and with a body to send again; the 404 and broken-template rows are not. */
+  resendable: boolean;
+};
 
 export const api = {
   webhooks: {

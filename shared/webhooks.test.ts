@@ -246,6 +246,9 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("http://h.local/a")).toBe(true);
     expect(isHttpUrl("https://h.local/a")).toBe(true);
     expect(isHttpUrl("ftp://h.local")).toBe(false);
+    // fetch refuses these, so every call would fail
+    expect(isHttpUrl("https://user:pass@h.local/a")).toBe(false);
+    expect(isHttpUrl("https://user@h.local/a")).toBe(false);
     expect(isHttpUrl("kein url")).toBe(false);
   });
 });

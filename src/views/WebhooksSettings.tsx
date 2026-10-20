@@ -62,6 +62,9 @@ export function WebhooksSettings(props: Props) {
   const { onError, onToast } = props;
   const [webhooks, setWebhooks] = useState<ListedWebhook[] | null>(null);
   const [states, setStates] = useState<Meta["states"]>([]);
+  /** The local data could not be loaded; the tab offers another try. */
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [deliveries, setDeliveries] = useState<DeliveryRow[] | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [formError, setFormError] = useState("");
@@ -72,18 +75,28 @@ export function WebhooksSettings(props: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.webhooks.list(), api.meta(), api.webhooks.deliveries()])
-      .then(([list, meta, log]) => {
+    setLoadFailed(false);
+    // The webhooks and the log are local data. The status names need TANSS and
+    // may fail on their own: then the list still shows, with "Status <id>".
+    api.meta().then(
+      (meta) => !cancelled && setStates([...meta.states].sort((a, b) => a.rank - b.rank)),
+      () => undefined,
+    );
+    Promise.all([api.webhooks.list(), api.webhooks.deliveries()])
+      .then(([list, log]) => {
         if (cancelled) return;
         setWebhooks(list.webhooks);
-        setStates([...meta.states].sort((a, b) => a.rank - b.rank));
         setDeliveries(log.deliveries);
       })
-      .catch((error: unknown) => !cancelled && onError(error));
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadFailed(true);
+        onError(error);
+      });
     return () => {
       cancelled = true;
     };
-  }, [onError]);
+  }, [onError, attempt]);
 
   const reloadLog = useCallback(async () => {
     setReloading(true);
@@ -212,7 +225,20 @@ export function WebhooksSettings(props: Props) {
     }
   }
 
-  if (webhooks === null) return null;
+  if (webhooks === null) {
+    if (!loadFailed) return null;
+    return (
+      <section className="section" style={{ gap: 12 }}>
+        <SectionTitle title="Webhooks" />
+        <p className="lead">Die Webhooks konnten nicht geladen werden.</p>
+        <div>
+          <button className="btn" onClick={() => setAttempt((n) => n + 1)}>
+            Erneut versuchen
+          </button>
+        </div>
+      </section>
+    );
+  }
   const knownIds = new Set(states.map((s) => s.id));
   const unknownIds = form ? form.statusFilter.filter((id) => !knownIds.has(id)) : [];
   const canSave = form !== null && form.name.trim() !== "" && form.url.trim() !== "" && !saving;
@@ -411,7 +437,7 @@ export function WebhooksSettings(props: Props) {
                     </span>
                     <DeliveryResult d={d} />
                     <span className="wh-act">
-                      {d.state !== "pending" ? (
+                      {d.resendable ? (
                         <button className="btn small" disabled={busy === d.id} onClick={() => void resend(d)}>
                           Erneut senden
                         </button>
