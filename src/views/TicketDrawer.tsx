@@ -6,6 +6,7 @@ import { dayAndClock, fullDate, minutesLabel, nowUnix, todayYmd } from "../forma
 import { BookingForm } from "./BookingForm.tsx";
 import { DraftButton } from "./DraftButton.tsx";
 import { TicketAgentActions } from "./TicketAgentActions.tsx";
+import { TicketWebhooks } from "./TicketWebhooks.tsx";
 import { Dot, Icon, Segmented, SPARK_SMALL } from "../ui/kit.tsx";
 import "../styles/drawer.css";
 
@@ -418,6 +419,7 @@ export function TicketDrawer(props: Props) {
             <Prop k="Erstellt" v={ticket ? dayAndClock(ticket.creationDate) : "—"} mono />
             <Prop k="Geändert" v={ticket ? dayAndClock(ticket.modified) : "—"} mono />
             <Prop k="Zeitsumme" v={formatHours(total)} mono />
+            <TicketWebhooks key={ticketId} ticketId={ticketId} onError={onError} onToast={props.onToast} />
             {ticket?.estimatedMinutes ? <Prop k="Geschätzt" v={minutesLabel(ticket.estimatedMinutes)} mono /> : null}
           </aside>
         </div>

@@ -53,6 +53,8 @@ import { parseMappings, parseTarget } from "../shared/mapping.ts";
 import { TanssError, type TanssClient, type TanssSession } from "./tanss.ts";
 import { generateTotp, secondsUntilNextCode, type TotpConfig } from "./totp.ts";
 import { registerAgentRoutes } from "./agent.ts";
+import { registerWebhookRoutes } from "./webhook-routes.ts";
+import type { WebhookWatcher } from "./webhook-watcher.ts";
 import { LlmError, createLlmClient, type LlmClient } from "./llm.ts";
 import { createMemoryStore, type Store } from "./store.ts";
 import { UpdateError, type UpdateService } from "./updates.ts";
@@ -84,6 +86,8 @@ export type AppOptions = {
   onLogin?: () => void;
   /** Called after an assignment changed here, so the dashboard sees it now. */
   onAssignment?: () => void;
+  /** Status-change webhooks; absent means the webhook routes do not exist. */
+  webhooks?: WebhookWatcher;
   log?: CallLog;
   tanssTicketUrl?: string;
   enableRateLimit?: boolean;
@@ -530,6 +534,10 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       // Taking a ticket should show up in "Übernommen" right away instead of
       // waiting for the next five-minute tick.
       if (parsed.data.assignedToEmployeeId !== undefined) opts.onAssignment?.();
+      // The webhooks should know this status change was made here, not guessed.
+      if (parsed.data.statusId !== undefined && parsed.data.statusId !== Number(current.item.statusId)) {
+        opts.webhooks?.notePortalChange(session.employeeId, id, Math.floor(now() / 1000));
+      }
       return { ticket: toTicketRow({ ...next, ...saved }, current.linked, []) };
     });
   });
@@ -1069,6 +1077,12 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
     mapPool,
     ...(opts.linear ? { linear: opts.linear } : {}),
   });
+
+  // --- webhooks --------------------------------------------------------------
+
+  if (opts.webhooks) {
+    registerWebhookRoutes(app, { store, watcher: opts.webhooks, employee, withSession, now });
+  }
 
   // --- log -------------------------------------------------------------------
 
