@@ -133,14 +133,8 @@ export function AgentSidebar(props: Props) {
     }
   }
 
-  if (!props.open) {
-    return (
-      <button className="agent-rail" onClick={props.onToggle} title="Agent-Sidebar öffnen (g a)">
-        <span className={`dot sm ${props.ready ? "agent" : "flat"}`} />
-        <span className="label">Agent</span>
-      </button>
-    );
-  }
+  // Closed, the sidebar leaves no rail: the "Agent" pill in the top bar brings it back.
+  if (!props.open) return null;
 
   const suggestions = [
     "Was ist liegengeblieben?",
@@ -152,22 +146,32 @@ export function AgentSidebar(props: Props) {
   return (
     <aside className="agent-sidebar">
       <div className="agent-sidebar-head">
-        <span className={`dot sm ${props.ready ? "agent" : "flat"}`} />
-        <span style={{ fontWeight: 500 }}>Agent</span>
-        <span className="mono tiny muted ellipsis">{props.ready ? props.model : "nicht eingerichtet"}</span>
+        <span className="title">Agent</span>
+        <span className="model">
+          <span className={`dot ${props.ready ? "ok" : "flat"}`} />
+          <span className="ellipsis">{props.ready ? `${props.model} · lokal` : "nicht eingerichtet"}</span>
+        </span>
         {chat.length ? (
           <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setChat([])} title="Verlauf leeren">
             leeren
           </button>
         ) : null}
-        <button className="btn ghost small" style={chat.length ? {} : { marginLeft: "auto" }} onClick={props.onToggle} title="Einklappen (g a)">
-          ›
+        <button
+          className="btn ghost icon"
+          style={chat.length ? { width: 32, height: 32 } : { marginLeft: "auto", width: 32, height: 32 }}
+          onClick={props.onToggle}
+          title="Schließen (g a)"
+          aria-label="Agent schließen"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
         </button>
       </div>
 
       <div className="agent-sidebar-list" ref={listRef}>
         {chat.length === 0 ? (
-          <div className="tiny muted pretty" style={{ padding: "4px 2px" }}>
+          <div className="small muted pretty">
             Fragen zu deinen Tickets, dem Tag und einzelnen Verläufen. Der Agent sucht und liest selbst in TANSS nach —
             eine Ticketnummer hilft, ist aber nicht nötig. Er antwortet nur; buchen und kommentieren bleibt bei dir.
           </div>
@@ -175,66 +179,70 @@ export function AgentSidebar(props: Props) {
         {chat.map((m, i) => (
           <div key={i} className={`chat-msg ${m.role}`}>
             <div className="who">
-              {m.role === "user" ? "Du" : "Agent"}
+              <span>{m.role === "user" ? "Du" : "Agent"}</span>
               {m.role === "assistant" && m.content ? (
-                <button
-                  className="btn ghost small"
-                  style={{ marginLeft: "auto" }}
-                  onClick={() => void copyAnswer(m.content, i)}
-                  title="Antwort kopieren"
-                >
+                <button className="btn ghost small" onClick={() => void copyAnswer(m.content, i)} title="Antwort kopieren">
                   {copiedAt === i ? "kopiert ✓" : "kopieren"}
                 </button>
               ) : null}
             </div>
-            <div className="text">{m.role === "assistant" ? linkIds(m.content, props.onOpen) : m.content}</div>
-            {m.source ? <div className="chat-source tiny muted">{linkIds(m.source, props.onOpen)}</div> : null}
+            <div className="bubble">
+              <div className="text">{m.role === "assistant" ? linkIds(m.content, props.onOpen) : m.content}</div>
+              {m.source ? <div className="chat-source tiny muted">{linkIds(m.source, props.onOpen)}</div> : null}
+            </div>
           </div>
         ))}
         {busy ? (
           <div className="chat-msg assistant">
             <div className="who">Agent</div>
-            <div className="text muted">
-              <span className="dot xs agent pulse" /> denkt …
+            <div className="bubble muted">
+              <span className="dot xs pulse" /> denkt …
             </div>
           </div>
         ) : null}
       </div>
 
       <div className="agent-sidebar-foot">
-        {props.openTicketId ? (
-          <div className="row tiny" style={{ marginBottom: 6 }}>
-            <span className="badge agent">Kontext</span>
-            <span className="mono">Ticket #{props.openTicketId}</span>
-            <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={props.onClearContext}>
-              ×
-            </button>
-          </div>
-        ) : null}
-        <div className="row" style={{ flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+        <div className="prompts">
           {suggestions.map((s) => (
-            <button key={s} className="btn ghost small" disabled={!props.ready || busy} onClick={() => void send(s)}>
+            <button key={s} className="prompt" disabled={!props.ready || busy} onClick={() => void send(s)}>
               {s}
             </button>
           ))}
         </div>
         {props.ready ? (
-          <textarea
-            ref={inputRef}
-            className="textarea"
-            rows={2}
-            value={draft}
-            placeholder={busy ? "Antwort kommt … die nächste Frage kannst du schon tippen" : "Frage an den Agenten … ⏎ sendet"}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send(draft);
-              }
-            }}
-          />
+          <div className="composer">
+            <textarea
+              ref={inputRef}
+              rows={2}
+              value={draft}
+              placeholder={busy ? "Antwort kommt … die nächste Frage kannst du schon tippen" : "Frage an den Agenten … ⏎ sendet"}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send(draft);
+                }
+              }}
+            />
+            <div className="row">
+              {props.openTicketId ? (
+                <span className="context">
+                  <span className="ellipsis">Kontext: Ticket #{props.openTicketId}</span>
+                  <button onClick={props.onClearContext} title="Kontext entfernen" aria-label="Kontext entfernen">
+                    ×
+                  </button>
+                </span>
+              ) : null}
+              <button className="send" disabled={busy || !draft.trim()} onClick={() => void send(draft)} title="Senden" aria-label="Senden">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
         ) : (
-          <button className="btn agent" onClick={() => props.onView("settings")}>
+          <button className="btn primary" onClick={() => props.onView("settings")}>
             KI einrichten
           </button>
         )}

@@ -15,6 +15,19 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ### Geändert
 
+- Neues Erscheinungsbild nach dem Redesign-Entwurf
+  (`docs/design/Agent-Portal-Redesign.dc.html`): Schwarz-Weiß mit Schwarz als
+  einziger Aktionsfarbe, Pillen-Buttons, weiche Karten, Inter als einzige
+  Schrift. Hell ist jetzt der Standard; wer bisher dunkel hatte, behält das,
+  bis er umschaltet.
+- Navigation in Gruppen (Arbeit, Analyse, System). Unten stehen TANSS-, KI- und
+  Versionsstatus, der angemeldete Techniker sowie die Buttons für
+  Erscheinungsbild und Abmelden. Die Kürzel stehen jetzt im Tooltip.
+- Kopfzeile mit Pfad, Suche und einem Button „Agent“, der die Agent-Leiste ein-
+  und ausblendet. Die schmale Leiste am rechten Rand fällt dafür weg.
+- Agent-Leiste als Chat mit Sprechblasen, Vorschlägen als Pillen und einem
+  Eingabefeld mit Senden-Button.
+- Anmeldeseite zweigeteilt: links eine schwarze Fläche, rechts das Formular.
 - Installationsanleitung neu geschrieben: welche zwei Dateien es braucht, wie
   die `.env` ausgefüllt wird, wie man startet und prüft.
 - Die `.env`-Vorlage (`env.example`) beginnt mit den beiden Pflichtwerten;

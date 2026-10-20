@@ -405,8 +405,7 @@ export function TimesView(props: Props) {
           <>
             <h2 style={{ fontSize: 15, margin: "18px 0 4px" }}>Offene Zeit</h2>
             <p className="tiny muted pretty" style={{ marginBottom: 8 }}>
-              Zeiten ohne Leistung in TANSS. „Vorschlag" fragt den Assistenten nur zu dieser Lücke,
-              „Spuren" sucht in eigenen Kommentaren und Änderungen des Tages.
+              Zeiten ohne Leistung in TANSS. „Vorschlag" fragt den Assistenten nur zu dieser Lücke.
             </p>
             <div>
               {gaps.map((gap) => {

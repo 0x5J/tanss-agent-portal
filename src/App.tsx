@@ -35,7 +35,7 @@ function readTheme(): Theme {
   } catch {
     /* private mode */
   }
-  return "dark";
+  return "light";
 }
 
 export function App() {
@@ -237,7 +237,7 @@ export function App() {
   }, [employeeId, paletteOpen, openTicket]);
 
   if (checking || !config) {
-    return <main className="login"><p className="muted">Verbinde …</p></main>;
+    return <main className="login center"><p className="muted">Verbinde …</p></main>;
   }
   if (!employeeId) {
     return (
@@ -266,11 +266,15 @@ export function App() {
         onStartUpdate={(version) =>
           void confirmAndStartUpdate(version, { onOverview: updates.replace, onToast: showToast, onError: report })
         }
+        userName={meta?.technicians.find((t) => t.id === employeeId)?.name ?? ""}
+        employeeId={employeeId}
         subtitle={subtitle}
         query={query}
         onQuery={setQuery}
         showSearch={view === "tickets"}
         onPalette={() => setPaletteOpen(true)}
+        agentOpen={sidebar}
+        onToggleAgent={() => setSidebar((o) => !o)}
         onLogout={handleLogout}
         side={
           <AgentSidebar
@@ -292,7 +296,7 @@ export function App() {
           <>
             {tanssDown ? (
               <div className="banner">
-                <span className="dot sm warn" />
+                <span className="dot warn" />
                 <span>TANSS-API antwortet nicht: {tanssDown}</span>
                 <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setTanssDown(null)}>
                   Ausblenden
@@ -414,7 +418,6 @@ export function App() {
 
       {toast ? (
         <div className="toast" role="status">
-          <span className="dot xs ok" />
           <span>{toast}</span>
         </div>
       ) : null}

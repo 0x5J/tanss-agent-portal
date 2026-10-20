@@ -53,7 +53,7 @@ export function LogView({ onSubtitle, onError }: Props) {
   }
 
   return (
-    <div style={{ padding: 16 }}>
+    <div className="page">
       <div className="card pad row" style={{ marginBottom: 14, gap: 26 }}>
         <span className="small muted">Dieser Server</span>
         <span>
