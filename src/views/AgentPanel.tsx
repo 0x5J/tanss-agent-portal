@@ -3,6 +3,7 @@ import { api, type Briefing } from "../api.ts";
 import type { Activity } from "../../shared/activity.ts";
 import type { PatternGroup } from "../../shared/agent.ts";
 import type { TicketRow } from "../../shared/tickets.ts";
+import { AgentHint, Icon, SPARK_SMALL } from "../ui/kit.tsx";
 
 type Props = {
   ready: boolean;
@@ -69,43 +70,36 @@ export function AgentPanel(props: Props) {
 
   const title = (id: number) => props.rows.find((r) => r.id === id)?.title ?? "";
   const hint = props.ready ? undefined : "KI nicht eingerichtet (Einstellungen)";
+  const results = Boolean(mine || list || patterns);
+  const n = props.visible.length;
+  const sentence = !props.ready
+    ? "Die lokale KI ist noch nicht eingerichtet — unter Einstellungen → Lokale KI."
+    : `Der Agent fasst deine Tickets oder „${props.listLabel}" zusammen und findet Fälle, die zusammengehören.`;
 
   return (
-    <div className="agent-panel">
-      <div className="head">
-        <span className="dot sm agent" />
-        <span className="title">Agent</span>
-        <button className="btn agent small" disabled={!props.ready || mineBusy || props.rows.length === 0} title={hint ?? "Briefing über alle Tickets, die mir zugewiesen sind"} onClick={() => void loadMine(false)}>
-          {mineBusy ? (
-            <>
-              <span className="dot xs agent pulse" /> schreibt …
-            </>
-          ) : (
-            "Mein Briefing"
-          )}
-        </button>
-        <button className="btn agent small" disabled={!props.ready || listBusy || props.visible.length === 0} title={hint ?? `Briefing über die Liste „${props.listLabel}" (${props.visible.length} Tickets)`} onClick={() => void loadList(false)}>
-          {listBusy ? (
-            <>
-              <span className="dot xs agent pulse" /> schreibt …
-            </>
-          ) : (
-            `Briefing „${props.listLabel}"`
-          )}
-        </button>
-        <button className="btn agent small" disabled={!props.ready || patternsBusy || props.visible.length < 2} title={hint ?? "Zusammengehörige Fälle in der Ansicht suchen"} onClick={() => void loadPatterns()}>
-          {patternsBusy ? (
-            <>
-              <span className="dot xs agent pulse" /> analysiert …
-            </>
-          ) : (
-            `Muster analysieren (${props.visible.length})`
-          )}
-        </button>
-        <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={() => setOpen((o) => !o)}>
-          {open ? "Zuklappen" : "Aufklappen"}
-        </button>
-      </div>
+    <div className="tk-agent">
+      <AgentHint
+        actions={
+          <>
+            <button className="btn primary" disabled={!props.ready || mineBusy || props.rows.length === 0} title={hint ?? "Briefing über alle Tickets, die mir zugewiesen sind"} onClick={() => void loadMine(false)}>
+              {mineBusy ? <Busy text="schreibt …" /> : "Mein Briefing"}
+            </button>
+            <button className="btn" disabled={!props.ready || listBusy || n === 0} title={hint ?? `Briefing über die Liste „${props.listLabel}" (${n} Tickets)`} onClick={() => void loadList(false)}>
+              {listBusy ? <Busy text="schreibt …" /> : "Liste zusammenfassen"}
+            </button>
+            <button className="btn" disabled={!props.ready || patternsBusy || n < 2} title={hint ?? "Zusammengehörige Fälle in der Ansicht suchen"} onClick={() => void loadPatterns()}>
+              {patternsBusy ? <Busy text="analysiert …" /> : `Muster analysieren (${n})`}
+            </button>
+            {results ? (
+              <button className="btn ghost" onClick={() => setOpen((o) => !o)}>
+                {open ? "Ausblenden" : "Einblenden"}
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        {sentence}
+      </AgentHint>
       {open && mine ? (
         <BriefingBlock title="Meine Tickets" briefing={mine} mine onOpen={props.onOpen} onRefresh={() => void loadMine(true)} onClose={() => setMine(null)} />
       ) : null}
@@ -119,27 +113,60 @@ export function AgentPanel(props: Props) {
         />
       ) : null}
       {open && patterns ? (
-        patterns.groups.length === 0 ? (
-          <div className="body muted">Keine zusammengehörigen Fälle in den {patterns.checked} geprüften Tickets erkannt.</div>
-        ) : (
-          <div>
-            {patterns.groups.map((g, i) => (
-              <div key={i} className="pattern-group">
-                <div className="ids">
-                  {g.ticketIds.map((id) => (
-                    <button key={id} className="btn ghost small" onClick={() => props.onOpen(id)} title={title(id)}>
-                      #{id}
-                    </button>
-                  ))}
-                  <span className="tiny muted ellipsis" style={{ alignSelf: "center" }}>{g.ticketIds.map(title).filter(Boolean).join(" · ")}</span>
+        <div className="tk-answer">
+          <AnswerHead title="Zusammengehörige Fälle" meta={`${patterns.checked} Tickets geprüft`} onClose={() => setPatterns(null)} />
+          {patterns.groups.length === 0 ? (
+            <div className="muted">Keine zusammengehörigen Fälle in den {patterns.checked} geprüften Tickets erkannt.</div>
+          ) : (
+            <div className="tk-groups">
+              {patterns.groups.map((g, i) => (
+                <div key={i} className="tk-group">
+                  <div className="ids">
+                    {g.ticketIds.map((id) => (
+                      <button key={id} className="chip mono tk-id" onClick={() => props.onOpen(id)} title={title(id)}>
+                        #{id}
+                      </button>
+                    ))}
+                    <span className="small muted ellipsis">{g.ticketIds.map(title).filter(Boolean).join(" · ")}</span>
+                  </div>
+                  <div className="pretty">{g.reason || "ohne Begründung"}</div>
                 </div>
-                <div className="muted">{g.reason || "ohne Begründung"}</div>
-              </div>
-            ))}
-            {patterns.truncated ? <div className="tiny muted" style={{ marginTop: 6 }}>Nur die ersten {patterns.checked} Zeilen wurden geprüft.</div> : null}
-          </div>
-        )
+              ))}
+              {patterns.truncated ? <div className="tiny muted">Nur die ersten {patterns.checked} Zeilen wurden geprüft.</div> : null}
+            </div>
+          )}
+        </div>
       ) : null}
+    </div>
+  );
+}
+
+function Busy({ text }: { text: string }) {
+  return (
+    <>
+      <span className="dot xs pulse" style={{ background: "currentColor" }} /> {text}
+    </>
+  );
+}
+
+function AnswerHead(props: { title: string; meta: string; onRefresh?: () => void; onClose: () => void }) {
+  return (
+    <div className="tk-answer-head">
+      <span className="tk-disc">
+        <Icon d={SPARK_SMALL} size={14} />
+      </span>
+      <span className="title">{props.title}</span>
+      <span className="small muted">{props.meta}</span>
+      <span className="actions">
+        {props.onRefresh ? (
+          <button className="btn small" onClick={props.onRefresh} title="Verwerfen und neu erzeugen">
+            Neu erzeugen
+          </button>
+        ) : null}
+        <button className="btn ghost small" onClick={props.onClose}>
+          Schließen
+        </button>
+      </span>
     </div>
   );
 }
@@ -153,27 +180,31 @@ function BriefingBlock(props: {
   onClose: () => void;
 }) {
   const f = props.briefing.facts;
+  const facts: [number, string, "danger" | "warn" | null][] = [
+    [f.total, props.mine ? "bei mir" : "in der Liste", null],
+    ...(!props.mine ? ([[f.mine, "bei mir", null]] as [number, string, null][]) : []),
+    [f.newSinceYesterday.length, "neu seit gestern", null],
+    [f.overdue.length, "überfällig", "danger"],
+    [f.stale.length, "≥7 d inaktiv", "warn"],
+    ...(!props.mine ? ([[f.unassigned.length, "unzugewiesen", null]] as [number, string, null][]) : []),
+    [f.waiting.length, "wartet auf Kunde", null],
+  ];
   return (
-    <div className="briefing">
-      <div className="row" style={{ marginTop: 10, gap: 8 }}>
-        <span className="tiny" style={{ color: "var(--agent)" }}>{props.title}</span>
-        <span className="tiny muted">{props.briefing.cached ? "von heute" : "eben erzeugt"}</span>
-        <button className="btn ghost small" onClick={props.onRefresh} title="Verwerfen und neu erzeugen">
-          neu
-        </button>
-        <button className="btn ghost small" onClick={props.onClose}>
-          ausblenden
-        </button>
-      </div>
-      <div className="body" style={{ marginTop: 4 }}>{linkIds(props.briefing.text, props.onOpen)}</div>
-      <div className="facts">
-        <span><b>{f.total}</b> {props.mine ? "bei mir" : "in der Liste"}</span>
-        {!props.mine ? <span><b>{f.mine}</b> bei mir</span> : null}
-        <span><b>{f.newSinceYesterday.length}</b> neu seit gestern</span>
-        <span><b>{f.overdue.length}</b> überfällig</span>
-        <span><b>{f.stale.length}</b> ≥7 d inaktiv</span>
-        {!props.mine ? <span><b>{f.unassigned.length}</b> unzugewiesen</span> : null}
-        <span><b>{f.waiting.length}</b> wartet auf Kunde</span>
+    <div className="tk-answer">
+      <AnswerHead
+        title={`Briefing · ${props.title}`}
+        meta={props.briefing.cached ? "von heute" : "eben erzeugt"}
+        onRefresh={props.onRefresh}
+        onClose={props.onClose}
+      />
+      <div className="tk-answer-body">{linkIds(props.briefing.text, props.onOpen)}</div>
+      <div className="tk-facts">
+        {facts.map(([value, label, tone]) => (
+          <span key={label} className="chip">
+            {tone && value > 0 ? <span className={`dot ${tone}`} style={{ width: 6, height: 6 }} /> : null}
+            <b>{value}</b> {label}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -186,7 +217,7 @@ function linkIds(text: string, onOpen: (id: number) => void) {
     const m = /^#(\d{2,})$/.exec(part);
     if (!m) return <span key={i}>{part}</span>;
     return (
-      <button key={i} className="btn ghost small mono" style={{ padding: "0 4px", verticalAlign: "baseline" }} onClick={() => onOpen(Number(m[1]))}>
+      <button key={i} className="tk-link" onClick={() => onOpen(Number(m[1]))}>
         {part}
       </button>
     );

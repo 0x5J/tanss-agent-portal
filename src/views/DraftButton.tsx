@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.ts";
 import { DRAFT_INTENTS, type DraftIntent } from "../../shared/agent.ts";
+import { Icon, SPARK_SMALL } from "../ui/kit.tsx";
 
 type Props = {
   ticketIds: number[];
@@ -12,7 +13,7 @@ type Props = {
 };
 
 /**
- * "Entwurf ▾": pick an intent, the agent writes into the comment box. The
+ * "Entwurf vom Agenten ▾": pick an intent, the agent writes into the comment box. The
  * person edits and sends; nothing leaves without that.
  */
 export function DraftButton(props: Props) {
@@ -46,28 +47,33 @@ export function DraftButton(props: Props) {
   return (
     <span className="filter-wrap" data-draft>
       <button
-        className="btn agent small"
+        className="btn"
         disabled={!props.ready || busy !== null}
         title={props.ready ? "Kommentar vom Agenten entwerfen lassen" : "KI nicht eingerichtet (Einstellungen)"}
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
         {busy ? (
           <>
-            <span className="dot xs agent pulse" /> entwirft …
+            <span className="dot xs pulse" style={{ background: "currentColor" }} /> entwirft …
           </>
         ) : (
-          "Entwurf ▾"
+          <>
+            <Icon d={SPARK_SMALL} size={14} />
+            Entwurf vom Agenten
+            <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.6 }}>▾</span>
+          </>
         )}
       </button>
       {open ? (
-        <div className="filter-menu" style={{ minWidth: 300, left: 0, top: "auto", bottom: "calc(100% + 4px)" }}>
-          {props.hasText ? <div className="tiny muted" style={{ padding: "4px 10px" }}>Ersetzt den vorhandenen Text.</div> : null}
+        <div className="popover" style={{ minWidth: 300, left: 0, bottom: "calc(100% + 6px)" }}>
+          <span className="popover-label">{props.hasText ? "Ersetzt den vorhandenen Text." : "Was soll der Agent entwerfen?"}</span>
           {DRAFT_INTENTS.filter((i) => i.id !== "custom").map((i) => (
-            <button key={i.id} className="palette-item" onClick={() => void run(i.id)}>
+            <button key={i.id} className="popover-item" onClick={() => void run(i.id)}>
               {i.label}
             </button>
           ))}
-          <div style={{ padding: "6px 10px", display: "flex", gap: 6 }}>
+          <div style={{ padding: "6px 2px 2px", display: "flex", gap: 6 }}>
             <input
               className="input"
               placeholder="Eigene Anweisung …"
@@ -79,7 +85,7 @@ export function DraftButton(props: Props) {
               style={{ flex: 1 }}
               autoFocus
             />
-            <button className="btn" disabled={!instruction.trim()} onClick={() => void run("custom")}>
+            <button className="btn primary" disabled={!instruction.trim()} onClick={() => void run("custom")} aria-label="Entwerfen">
               ⏎
             </button>
           </div>

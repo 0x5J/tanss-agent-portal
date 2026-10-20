@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.ts";
-import { DonutCard, HBars, StatTile } from "../ui/charts.tsx";
+import { RankRows, RingCard, VBars } from "../ui/charts.tsx";
+import { CheckBox, Dot, PageHeader, SectionTitle, Segmented, Tile } from "../ui/kit.tsx";
+import "../styles/dashboard.css";
 import {
   ageBuckets,
   claimsByEmployee,
@@ -58,6 +60,8 @@ export function DashboardView(props: Props) {
   const [reports, setReports] = useState<{ name: string; day: string; bytes: number }[]>([]);
   const [reportLists, setReportLists] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  /** When the board last arrived — the "Stand" in the subtitle. */
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const reloadRef = useRef<(() => void) | null>(null);
   const { onSubtitle, onError } = props;
 
@@ -69,6 +73,7 @@ export function DashboardView(props: Props) {
         const storedViews = await loadViews(tickets.employeeId);
         if (cancelled) return;
         setBoard(tickets);
+        setLoadedAt(new Date());
         setViews(storedViews);
         setDash(dashboard);
         setListKey((current) => {
@@ -189,12 +194,18 @@ export function DashboardView(props: Props) {
   const yesterday = shiftYmd(today, -1);
   const yesterdayEntry = days.find((d) => d.day === yesterday) ?? null;
 
+  const stand = loadedAt ? ` · Stand ${clock(loadedAt.getHours() * 60 + loadedAt.getMinutes())}` : "";
+  const subtitle = selected ? `${selected.label} · ${nf.format(selected.rows.length)} Tickets${stand}` : "lädt …";
   useEffect(() => {
-    onSubtitle(selected ? `${selected.label} · ${nf.format(selected.rows.length)} Tickets` : "lädt …");
-  }, [selected, onSubtitle]);
+    onSubtitle(subtitle);
+  }, [subtitle, onSubtitle]);
 
   if (!board || !selected) {
-    return <div className="page muted small">Lädt …</div>;
+    return (
+      <div className="view">
+        <PageHeader title="Dashboard" subtitle="lädt …" />
+      </div>
+    );
   }
 
   const key = selected.key;
@@ -205,188 +216,197 @@ export function DashboardView(props: Props) {
   const curveToday = dayCurve(todayEntry, key);
   const curveYesterday = dayCurve(yesterdayEntry, key);
   const interval = dash?.intervalMinutes ?? 5;
+  const polling = dash?.polling === true;
   const claims = historyForList(history, key);
   const age = ageBuckets(selected.rows, today);
+  const reportOn = reportLists.includes(key);
+  const customers = topCompanies(selected.rows);
 
   return (
-    <div className="dash">
-      <div className="row" style={{ marginBottom: 14, gap: 10 }}>
-        <span className="small muted">Liste</span>
-        <select className="select" value={key} onChange={(e) => setListKey(e.target.value)} style={{ minWidth: 220 }}>
-          {members.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-        <span className="tiny muted">Alle Diagramme gelten für diese Liste und ihre Filterkriterien.</span>
-        <label
-          className="row tiny muted"
-          style={{ gap: 5, marginLeft: "auto" }}
+    <div className="view dash-view">
+      <PageHeader title="Dashboard" subtitle={subtitle}>
+        <button
+          className="btn lg"
+          onClick={() => void toggleReport(key)}
           title="Am Tageswechsel wird der abgeschlossene Tag als A4-Bericht abgelegt"
+          aria-pressed={reportOn}
         >
-          <input type="checkbox" checked={reportLists.includes(key)} onChange={() => void toggleReport(key)} />
+          <CheckBox on={reportOn} size={11} />
           Tagesbericht ablegen
-        </label>
-        <button className="btn ghost small" disabled={refreshing} onClick={() => void refreshNow()}>
-          {refreshing ? "lädt …" : "Aktualisieren"}
         </button>
-      </div>
+        <button className="btn primary lg" disabled={refreshing} onClick={() => void refreshNow()}>
+          {refreshing ? "Lädt …" : "Aktualisieren"}
+        </button>
+      </PageHeader>
 
-      <CollectorStatus health={dash?.health ?? null} polling={dash?.polling === true} interval={interval} />
-
-      <div className="dash-tiles">
-        <StatTile label="Offen" value={nf.format(tiles.total)} />
-        <StatTile label="Unzugewiesen" value={nf.format(tiles.unassigned)} />
-        <StatTile label="Neu heute" value={nf.format(tiles.newToday)} />
-        <StatTile label="Wartet auf Kunde" value={nf.format(tiles.waiting)} />
-        <StatTile label="Überfällig" value={nf.format(due.overdue)} tone={due.overdue > 0 ? "danger" : undefined} />
-        <StatTile label="Heute fällig" value={nf.format(due.dueToday)} tone={due.dueToday > 0 ? "warn" : undefined} />
-        <StatTile label="Fällig diese Woche" value={nf.format(due.dueWeek)} />
-      </div>
-
-      <div className="dash-row donuts">
-        <DonutCard title="Nach Status" segments={donutSegments(selected.rows, "status")} total={tiles.total} />
-        <DonutCard title="Nach Zuständig" segments={donutSegments(selected.rows, "assignee")} total={tiles.total} />
-        <DonutCard title="Nach Typ" segments={donutSegments(selected.rows, "type")} total={tiles.total} />
-      </div>
-
-      <div className="viz-card">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <span className="viz-title">Übernommen</span>
-          <div className="row" style={{ marginLeft: "auto", gap: 4 }}>
-            {([
-              ["today", "Heute"],
-              ["week", "7 Tage"],
-              ["month", "30 Tage"],
-              ["all", "alles"],
-            ] as const).map(([mode, label]) => (
-              <button
-                key={mode}
-                className={`btn ghost small${claimsMode === mode ? " active" : ""}`}
-                onClick={() => setClaimsMode(mode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+      <div className="dash-list">
+        <div className="dash-list-row">
+          <span className="dash-list-label">Liste</span>
+          <Segmented
+            label="Liste"
+            options={members.map((m) => ({ id: m.key, label: m.label }))}
+            value={key}
+            onChange={(next) => setListKey(next)}
+          />
         </div>
-        <ClaimsList claims={claims} today={today} polling={dash?.polling === true} interval={interval} onOpen={props.onOpen} />
+        <span className="small muted">Alle Diagramme gelten für diese Liste und ihre Filterkriterien.</span>
+        <CollectorStatus health={dash?.health ?? null} polling={polling} interval={interval} />
       </div>
 
-      <div className="viz-card">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <span className="viz-title">Eingang über den Tag</span>
-          <div className="row" style={{ marginLeft: "auto", gap: 4 }}>
-            <button className={`btn ghost small${intakeMode === "today" ? " active" : ""}`} onClick={() => setIntakeMode("today")}>
-              Heute
-            </button>
-            <button className={`btn ghost small${intakeMode === "week" ? " active" : ""}`} onClick={() => setIntakeMode("week")}>
-              7 Tage
-            </button>
-            <button className={`btn ghost small${intakeMode === "grid" ? " active" : ""}`} onClick={() => setIntakeMode("grid")}>
-              Wochenraster
-            </button>
-          </div>
-        </div>
+      <div className="tiles">
+        <Tile label="Offen" value={nf.format(tiles.total)} />
+        <Tile label="Unzugewiesen" value={nf.format(tiles.unassigned)} />
+        <Tile label="Neu heute" value={nf.format(tiles.newToday)} />
+        <Tile label="Wartet auf Kunde" value={nf.format(tiles.waiting)} />
+        <Tile label="Überfällig" value={nf.format(due.overdue)} tone={due.overdue > 0 ? "danger" : undefined} />
+        <Tile label="Heute fällig" value={nf.format(due.dueToday)} tone={due.dueToday > 0 ? "warn" : undefined} />
+        <Tile label="Fällig diese Woche" value={nf.format(due.dueWeek)} />
+      </div>
+
+      <div className="ring-grid">
+        <RingCard title="Nach Status" segments={donutSegments(selected.rows, "status")} total={tiles.total} />
+        <RingCard title="Nach Zuständig" segments={donutSegments(selected.rows, "assignee")} total={tiles.total} />
+        <RingCard title="Nach Typ" segments={donutSegments(selected.rows, "type")} total={tiles.total} />
+      </div>
+
+      <section className="section">
+        <SectionTitle title="Übernommen">
+          <Segmented
+            label="Zeitraum der Übernahmen"
+            options={[
+              { id: "today", label: "Heute" },
+              { id: "week", label: "7 Tage" },
+              { id: "month", label: "30 Tage" },
+              { id: "all", label: "Alles" },
+            ]}
+            value={claimsMode}
+            onChange={setClaimsMode}
+          />
+        </SectionTitle>
+        <ClaimsList claims={claims} today={today} polling={polling} interval={interval} onOpen={props.onOpen} />
+      </section>
+
+      <section className="section">
+        <SectionTitle title="Eingang über den Tag">
+          <Segmented
+            label="Ansicht des Eingangs"
+            options={[
+              { id: "today", label: "Heute" },
+              { id: "week", label: "7 Tage" },
+              { id: "grid", label: "Wochenraster" },
+            ]}
+            value={intakeMode}
+            onChange={setIntakeMode}
+          />
+        </SectionTitle>
         {intakeMode === "today" ? (
-          <BarChart
+          <VBars
             values={intakeToday}
-            labelOf={(i) => `${i} Uhr`}
+            labelOf={(i) => `${i}–${i + 1} Uhr`}
             tickOf={(i) => (i % 3 === 0 ? String(i) : "")}
+            height={220}
+            maxBar={24}
             empty="Heute ist noch kein Ticket in dieser Liste angelegt worden."
+            ariaLabel="Eingang heute je Stunde"
           />
         ) : intakeMode === "week" ? (
-          <BarChart
+          <VBars
             values={intakeWeek.map((d) => d.count)}
             labelOf={(i) => `${weekdayLabel(intakeWeek[i].day)} ${intakeWeek[i].day.slice(8)}.${intakeWeek[i].day.slice(5, 7)}.`}
             tickOf={(i) => weekdayLabel(intakeWeek[i].day)}
+            height={220}
+            maxBar={64}
             empty="In den letzten 7 Tagen ist kein Ticket in dieser Liste angelegt worden."
+            ariaLabel="Eingang der letzten 7 Tage"
           />
         ) : (
           <Heatmap grid={weekHeatmap(days, key, selected.rows, today)} />
         )}
-        <div className="tiny muted" style={{ marginTop: 6 }}>
+        <span className="tiny muted pretty">
           {intakeMode === "grid"
-            ? `Wochentag × Stunde über die gesammelten Wochen (bis 8) — wann kommen die Tickets dieser Liste eigentlich?`
-            : "Neu angelegte Tickets der Liste, nach Erstellzeit — auch die, die inzwischen wieder zu sind"}
-          {dash?.polling ? "" : " (ohne Hintergrund-Messung zählt nur, was gerade offen ist)"}.
-        </div>
-      </div>
+            ? "Wochentag × Stunde über die gesammelten Wochen (bis 8) – wann kommen die Tickets dieser Liste eigentlich?"
+            : "Neu angelegte Tickets der Liste, nach Erstellzeit – auch die, die inzwischen wieder zu sind."}
+          {polling ? "" : " Ohne Hintergrund-Messung zählt nur, was gerade offen ist."}
+        </span>
+      </section>
 
-      <div className="dash-row">
-        <div className="viz-card" style={{ marginBottom: 0 }}>
-          <div className="viz-title" style={{ marginBottom: 8 }}>Alter der Tickets</div>
-          <BarChart
+      <div className="dash-pair">
+        <section className="section dash-pair-wide">
+          <SectionTitle title="Alter der Tickets" />
+          <VBars
             values={age.map((b) => b.count)}
             labelOf={(i) => age[i].label}
             tickOf={(i) => age[i].label}
+            height={180}
+            maxBar={64}
             empty="Keine Tickets in dieser Liste."
-            compact
+            ariaLabel="Alter der Tickets"
           />
-        </div>
-        <div className="viz-card" style={{ marginBottom: 0 }}>
-          <div className="viz-title" style={{ marginBottom: 8 }}>Top-Kunden</div>
-          <HBars rows={topCompanies(selected.rows)} />
-        </div>
+        </section>
+        <section className="section dash-pair-narrow">
+          <SectionTitle title="Top-Kunden" />
+          <RankRows
+            rows={customers.map((c) => ({ label: c.label, value: c.count }))}
+            format={(v) => `${nf.format(v)} ${v === 1 ? "Ticket" : "Tickets"}`}
+            empty="Keine Tickets in dieser Liste."
+          />
+        </section>
       </div>
 
-      <div className="viz-card">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <span className="viz-title">Verlauf über den Tag</span>
-          <div className="row viz-legend" style={{ marginLeft: "auto" }}>
-            <span className="viz-key" style={{ background: "var(--viz-1)" }} />
-            <span className="tiny muted">Heute</span>
-            <span className="viz-key" style={{ background: "var(--viz-dim)" }} />
-            <span className="tiny muted">Gestern</span>
-          </div>
-        </div>
+      <section className="section">
+        <SectionTitle title="Verlauf über den Tag">
+          <span className="curve-legend">
+            <span>
+              <i style={{ background: "var(--ink)" }} />
+              Heute
+            </span>
+            <span>
+              <i style={{ background: "var(--v4)" }} />
+              Gestern
+            </span>
+          </span>
+        </SectionTitle>
         {curveToday.length > 0 || curveYesterday.length > 0 ? (
           <CurveChart today={curveToday} yesterday={curveYesterday} intervalMinutes={interval} />
-        ) : dash?.polling ? (
-          <div className="small muted" style={{ padding: "18px 0" }}>
-            Noch keine Messpunkte — der Server zählt alle {interval} Minuten, die Kurve entsteht über den Tag.
+        ) : polling ? (
+          <div className="empty-inline">
+            Noch keine Messpunkte – der Server zählt alle {interval} Minuten, die Kurve entsteht über den Tag.
           </div>
         ) : (
-          <div className="small muted pretty" style={{ padding: "18px 0", maxWidth: "68ch" }}>
-            Für die Tagesverlaufskurve braucht der Server eigene Messpunkte: <span className="mono">TANSS_USERNAME</span> und{" "}
-            <span className="mono">TANSS_PASSWORD</span> in der <span className="mono">.env</span> setzen, dann zählt er alle{" "}
-            {interval} Minuten selbst — auch ohne offenen Browser.
+          <div className="empty-inline pretty">
+            Für die Tagesverlaufskurve braucht der Server eigene Messpunkte: <code>TANSS_USERNAME</code> und{" "}
+            <code>TANSS_PASSWORD</code> in der <code>.env</code> setzen, dann zählt er alle {interval} Minuten selbst –
+            auch ohne offenen Browser.
           </div>
         )}
-        <div className="tiny muted" style={{ marginTop: 6 }}>
+        <span className="tiny muted">
           Anzahl der Tickets in der Liste je Messpunkt (alle {interval} min). Lücken heißen: da wurde nicht gemessen.
-        </div>
-      </div>
+        </span>
+      </section>
 
-      <div className="viz-card">
-        <div className="row" style={{ marginBottom: 8 }}>
-          <span className="viz-title">Archiv</span>
-          <span className="tiny muted" style={{ marginLeft: "auto" }}>
-            {reports.length ? `${reports.length} Berichte` : "noch keiner abgelegt"}
-          </span>
-        </div>
+      <section className="section">
+        <SectionTitle title="Archiv" note={reports.length ? `${nf.format(reports.length)} ${reports.length === 1 ? "Bericht" : "Berichte"}` : "noch keiner abgelegt"} />
         {reports.length ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="table">
             {reports.slice(0, 30).map((r) => (
-              <div key={r.name} className="row tiny" style={{ gap: 8 }}>
-                <span className="mono" style={{ flex: "none", width: 88 }}>{r.day}</span>
-                <span className="muted ellipsis" style={{ flex: 1, minWidth: 0 }}>{r.name}</span>
-                <a className="btn ghost small" href={`/me/reports/${r.name}`} target="_blank" rel="noreferrer">
-                  öffnen
+              <div key={r.name} className="trow archive-row">
+                <span className="num-cell">{formatShortDate(r.day)}</span>
+                <span className="muted ellipsis" title={r.name}>{r.name}</span>
+                <span className="muted small archive-size">{formatBytes(r.bytes)}</span>
+                <a className="btn small" href={`/me/reports/${r.name}`} target="_blank" rel="noreferrer">
+                  Öffnen
                 </a>
               </div>
             ))}
           </div>
         ) : (
-          <div className="tiny muted pretty">
-            Ist „Tagesbericht ablegen" für eine Liste eingeschaltet, schreibt der Sammler den
-            abgeschlossenen Tag beim ersten Messpunkt des Folgetags als A4-Seite hierher — mit
-            Verlauf, Eingang je Stunde und allen Übernahmen. Die Seite ist in sich geschlossen und
-            lässt sich drucken.
-          </div>
+          <p className="small muted pretty lead">
+            Ist „Tagesbericht ablegen“ für eine Liste eingeschaltet, schreibt der Sammler den abgeschlossenen Tag beim
+            ersten Messpunkt des Folgetags als A4-Seite hierher – mit Verlauf, Eingang je Stunde und allen Übernahmen.
+            Die Seite ist in sich geschlossen und lässt sich drucken.
+          </p>
         )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -400,41 +420,41 @@ function CollectorStatus(props: { health: CollectorHealth | null; polling: boole
   const { health } = props;
   if (!props.polling) {
     return (
-      <div className="banner flat" style={{ marginBottom: 14 }}>
-        <span className="dot sm flat" />
-        <span className="small pretty">
-          Ohne Hintergrund-Messung zeigen die Diagramme nur den aktuellen Stand: Was aus der Liste
-          herausfällt, verschwindet überall. Für Verlauf, Eingangs-Historie und Übernahmen{" "}
-          <span className="mono">TANSS_USERNAME</span>/<span className="mono">TANSS_PASSWORD</span> setzen.
+      <div className="collector-banner">
+        <Dot tone="flat" />
+        <span className="pretty">
+          <strong>Ohne Hintergrund-Messung</strong> zeigen die Diagramme nur den aktuellen Stand: Was aus der Liste
+          herausfällt, verschwindet überall. Für Verlauf, Eingangs-Historie und Übernahmen <code>TANSS_USERNAME</code>/
+          <code>TANSS_PASSWORD</code> in der <code>.env</code> setzen.
         </span>
       </div>
     );
   }
   if (health?.stopped) {
     return (
-      <div className="banner danger" style={{ marginBottom: 14 }}>
-        <span className="dot sm danger" />
-        <span className="small pretty">
-          <strong>Automatische Messung gestoppt.</strong> {health.lastError} — es wird nichts mehr versucht,
-          bis die Zugangsdaten geprüft und der Container neu gestartet ist.
+      <div className="collector-banner">
+        <Dot tone="danger" />
+        <span className="pretty">
+          <strong>Automatische Messung gestoppt.</strong> {health.lastError} – es wird nichts mehr versucht, bis die
+          Zugangsdaten geprüft und der Container neu gestartet ist.
         </span>
       </div>
     );
   }
   if (health && health.lastError) {
     return (
-      <div className="banner" style={{ marginBottom: 14 }}>
-        <span className="dot sm warn" />
-        <span className="small pretty">
-          Letzte Messung fehlgeschlagen: {health.lastError}
-          {health.retryAfter > 0 ? ` — nächster Versuch um ${clock(minuteOfDay(health.retryAfter))}.` : ""}
+      <div className="collector-banner">
+        <Dot tone="warn" />
+        <span className="pretty">
+          <strong>Letzte Messung fehlgeschlagen:</strong> {health.lastError}
+          {health.retryAfter > 0 ? ` – nächster Versuch um ${clock(minuteOfDay(health.retryAfter))}.` : ""}
         </span>
       </div>
     );
   }
   return (
-    <div className="row tiny muted" style={{ marginBottom: 14, gap: 6 }}>
-      <span className="dot xs ok" />
+    <div className="collector-ok">
+      <Dot tone="ok" />
       <span>
         {health?.lastSampleAt
           ? `Letzte Messung um ${clock(minuteOfDay(health.lastSampleAt))} · alle ${props.interval} min`
@@ -444,161 +464,47 @@ function CollectorStatus(props: { health: CollectorHealth | null; polling: boole
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${nf.format(bytes)} B`;
+  return `${(bytes / 1024).toFixed(1).replace(".", ",")} KB`;
+}
+
 function minuteOfDay(unixSeconds: number): number {
   const d = new Date(unixSeconds * 1000);
   return d.getHours() * 60 + d.getMinutes();
 }
 
-const PAD = { left: 34, right: 12, top: 10, bottom: 24 };
-
-/**
- * The rendered width of the chart's wrapper, so the SVG draws 1:1 in real
- * pixels — scaling a fixed viewBox up would fatten text and strokes.
- */
-function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
-  const [width, setWidth] = useState(760);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const next = Math.round(entries[0]?.contentRect.width ?? 0);
-      if (next > 0) setWidth(next);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref]);
-  return Math.max(420, width);
-}
+type Point = { minute: number; count: number };
 
 function niceMax(max: number): { max: number; step: number } {
   if (max <= 4) return { max: Math.max(max, 2), step: 1 };
   const raw = max / 3;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 5, 10].map((s) => s * mag).find((s) => s >= raw) ?? mag * 10;
-  return { max: Math.ceil(max / step) * step, step };
+  return { max: Math.ceil((max * 1.1) / step) * step, step };
 }
 
-/** Columns over an index axis — one series, one hue, hover carries the exact value. */
-function BarChart(props: {
-  values: number[];
-  labelOf: (index: number) => string;
-  tickOf: (index: number) => string;
-  empty: string;
-  compact?: boolean;
-}) {
-  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const width = useWidth(wrapRef);
-  const { values } = props;
-  const total = values.reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    return <div className="small muted" style={{ padding: "18px 0" }}>{props.empty}</div>;
-  }
-  const height = props.compact ? 180 : 230;
-  const plotH = height - PAD.top - PAD.bottom;
-  const plotW = width - PAD.left - PAD.right;
-  const { max, step } = niceMax(Math.max(...values));
-  const slot = plotW / values.length;
-  const barW = Math.min(24, slot - 2);
-  const yOf = (v: number) => PAD.top + plotH - (v / max) * plotH;
-  const peak = values.indexOf(Math.max(...values));
-  const ticks: number[] = [];
-  for (let v = step; v <= max; v += step) ticks.push(v);
-
-  function show(event: React.MouseEvent, index: number) {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setTip({
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top - 28,
-      text: `${props.labelOf(index)} · ${nf.format(values[index])}`,
-    });
-  }
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
-      <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" onMouseLeave={() => setTip(null)}>
-        {ticks.map((v) => (
-          <g key={v}>
-            <line x1={PAD.left} x2={width - PAD.right} y1={yOf(v)} y2={yOf(v)} stroke="var(--viz-grid)" strokeWidth="1" />
-            <text x={PAD.left - 6} y={yOf(v) + 3} textAnchor="end" fontSize="11" fill="var(--text2)">
-              {nf.format(v)}
-            </text>
-          </g>
-        ))}
-        <line x1={PAD.left} x2={width - PAD.right} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="var(--viz-axis)" strokeWidth="1" />
-        {values.map((v, i) => {
-          const x = PAD.left + i * slot + (slot - barW) / 2;
-          const y = yOf(v);
-          const h = PAD.top + plotH - y;
-          return (
-            <g key={i}>
-              {v > 0 ? (
-                <path
-                  d={`M ${x} ${PAD.top + plotH} V ${y + Math.min(4, h)} Q ${x} ${y} ${x + Math.min(4, barW / 2)} ${y} H ${x + barW - Math.min(4, barW / 2)} Q ${x + barW} ${y} ${x + barW} ${y + Math.min(4, h)} V ${PAD.top + plotH} Z`}
-                  fill="var(--viz-1)"
-                />
-              ) : null}
-              {i === peak && v > 0 ? (
-                <text x={x + barW / 2} y={y - 5} textAnchor="middle" fontSize="11" fill="var(--text)">
-                  {nf.format(v)}
-                </text>
-              ) : null}
-              <rect
-                x={PAD.left + i * slot}
-                y={PAD.top}
-                width={slot}
-                height={plotH}
-                fill="transparent"
-                onMouseEnter={(e) => show(e, i)}
-                onMouseMove={(e) => show(e, i)}
-              />
-            </g>
-          );
-        })}
-        {values.map((_, i) => {
-          const label = props.tickOf(i);
-          if (!label) return null;
-          return (
-            <text key={i} x={PAD.left + i * slot + slot / 2} y={height - 6} textAnchor="middle" fontSize="11" fill="var(--text2)">
-              {label}
-            </text>
-          );
-        })}
-      </svg>
-      {tip ? (
-        <div className="viz-tip" style={{ left: tip.x, top: tip.y }}>
-          {tip.text}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+const CURVE_W = 1440;
+const CURVE_H = 220;
 
 /**
- * The day-course: today in the accent hue, yesterday as gray context. The
- * line breaks where measuring paused — a gap in the data stays a gap.
+ * The day-course: today in ink, yesterday in grey as context. The line breaks
+ * where measuring paused — a gap in the data stays a gap. Drawn as an SVG
+ * stretched over the plot (minutes across, count up), with the tick lines,
+ * the last point and the hover read-out as plain HTML on top.
  */
-function CurveChart(props: {
-  today: { minute: number; count: number }[];
-  yesterday: { minute: number; count: number }[];
-  intervalMinutes: number;
-}) {
-  const [hover, setHover] = useState<{ x: number; text: string } | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const width = useWidth(wrapRef);
-  const height = 240;
-  const plotW = width - PAD.left - PAD.right;
-  const plotH = height - PAD.top - PAD.bottom;
+function CurveChart(props: { today: Point[]; yesterday: Point[]; intervalMinutes: number }) {
+  const [hover, setHover] = useState<{ minute: number; text: string } | null>(null);
+  const plotRef = useRef<HTMLDivElement | null>(null);
   const all = [...props.today, ...props.yesterday];
   const { max, step } = niceMax(Math.max(1, ...all.map((p) => p.count)));
-  const xOf = (minute: number) => PAD.left + (minute / (24 * 60)) * plotW;
-  const yOf = (v: number) => PAD.top + plotH - (v / max) * plotH;
   const gap = Math.max(props.intervalMinutes * 3, 15);
+  const ticks: number[] = [];
+  for (let v = step; v < max; v += step) ticks.push(v);
 
-  function segments(points: { minute: number; count: number }[]): { minute: number; count: number }[][] {
-    const result: { minute: number; count: number }[][] = [];
-    let current: { minute: number; count: number }[] = [];
+  function segments(points: Point[]): Point[][] {
+    const result: Point[][] = [];
+    let current: Point[] = [];
     for (const p of points) {
       if (current.length > 0 && p.minute - current[current.length - 1].minute > gap) {
         result.push(current);
@@ -609,21 +515,19 @@ function CurveChart(props: {
     if (current.length > 0) result.push(current);
     return result;
   }
-
-  const path = (seg: { minute: number; count: number }[]) =>
-    seg.map((p, i) => `${i === 0 ? "M" : "L"} ${xOf(p.minute).toFixed(1)} ${yOf(p.count).toFixed(1)}`).join(" ");
-
+  const xy = (p: Point) => `${p.minute.toFixed(1)} ${(CURVE_H - (p.count / max) * CURVE_H).toFixed(1)}`;
+  const path = (points: Point[]) =>
+    segments(points)
+      .map((seg) => seg.map((p, i) => `${i === 0 ? "M" : "L"} ${xy(p)}`).join(" "))
+      .join(" ");
   const last = props.today[props.today.length - 1] ?? null;
-  const ticks: number[] = [];
-  for (let v = step; v <= max; v += step) ticks.push(v);
 
-  function onMove(event: React.MouseEvent<SVGSVGElement>) {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect || props.today.length + props.yesterday.length === 0) return;
-    const viewX = event.clientX - rect.left;
-    const minute = Math.max(0, Math.min(24 * 60 - 1, ((viewX - PAD.left) / plotW) * 24 * 60));
-    const nearest = (points: { minute: number; count: number }[]) =>
-      points.reduce<{ minute: number; count: number } | null>(
+  function onMove(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = plotRef.current?.getBoundingClientRect();
+    if (!rect || all.length === 0) return;
+    const minute = Math.max(0, Math.min(24 * 60 - 1, ((event.clientX - rect.left) / rect.width) * 24 * 60));
+    const nearest = (points: Point[]) =>
+      points.reduce<Point | null>(
         (best, p) => (best === null || Math.abs(p.minute - minute) < Math.abs(best.minute - minute) ? p : best),
         null,
       );
@@ -633,49 +537,47 @@ function CurveChart(props: {
     if (t && Math.abs(t.minute - minute) <= 60) parts.push(`${clock(t.minute)} · ${nf.format(t.count)}`);
     if (y && Math.abs(y.minute - minute) <= 60) parts.push(`gestern ${clock(y.minute)} · ${nf.format(y.count)}`);
     if (parts.length === 0) return setHover(null);
-    setHover({ x: xOf((t ?? y)!.minute), text: parts.join("   ") });
+    setHover({ minute: (t ?? y)!.minute, text: parts.join("   ") });
   }
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
-      <svg width="100%" viewBox={`0 0 ${width} ${height}`} role="img" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+    <div className="curve">
+      <div ref={plotRef} className="curve-plot" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         {ticks.map((v) => (
-          <g key={v}>
-            <line x1={PAD.left} x2={width - PAD.right} y1={yOf(v)} y2={yOf(v)} stroke="var(--viz-grid)" strokeWidth="1" />
-            <text x={PAD.left - 6} y={yOf(v) + 3} textAnchor="end" fontSize="11" fill="var(--text2)">
-              {nf.format(v)}
-            </text>
-          </g>
+          <div key={v} className="curve-tick" style={{ bottom: `${(v / max) * 100}%` }}>
+            <span>{nf.format(v)}</span>
+          </div>
         ))}
-        <line x1={PAD.left} x2={width - PAD.right} y1={PAD.top + plotH} y2={PAD.top + plotH} stroke="var(--viz-axis)" strokeWidth="1" />
-        {[0, 6, 12, 18, 24].map((h) => (
-          <text key={h} x={xOf(h * 60)} y={height - 6} textAnchor="middle" fontSize="11" fill="var(--text2)">
-            {h}
-          </text>
-        ))}
-        {segments(props.yesterday).map((seg, i) => (
-          <path key={`y${i}`} d={path(seg)} fill="none" stroke="var(--viz-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        ))}
-        {segments(props.today).map((seg, i) => (
-          <path key={`t${i}`} d={path(seg)} fill="none" stroke="var(--viz-1)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        ))}
-        {hover ? (
-          <line x1={hover.x} x2={hover.x} y1={PAD.top} y2={PAD.top + plotH} stroke="var(--viz-axis)" strokeWidth="1" />
-        ) : null}
+        <svg viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} preserveAspectRatio="none" role="img" aria-label="Tickets in der Liste über den Tag">
+          <path d={path(props.yesterday)} fill="none" stroke="var(--v4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          <path d={path(props.today)} fill="none" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        </svg>
+        {hover ? <span className="curve-cursor" style={{ left: `${(hover.minute / 1440) * 100}%` }} /> : null}
         {last ? (
-          <g>
-            <circle cx={xOf(last.minute)} cy={yOf(last.count)} r="4.5" fill="var(--viz-1)" stroke="var(--surface)" strokeWidth="2" />
-            <text x={Math.min(xOf(last.minute) + 8, width - PAD.right)} y={yOf(last.count) - 7} fontSize="11" fill="var(--text)">
+          <>
+            <span
+              className="curve-dot"
+              style={{ left: `calc(${(last.minute / 1440) * 100}% - 6px)`, bottom: `calc(${(last.count / max) * 100}% - 6px)` }}
+            />
+            <span
+              className="curve-dot-label"
+              style={{ left: `calc(${(last.minute / 1440) * 100}% + 10px)`, bottom: `calc(${(last.count / max) * 100}% + 4px)` }}
+            >
               {nf.format(last.count)}
-            </text>
-          </g>
+            </span>
+          </>
         ) : null}
-      </svg>
-      {hover ? (
-        <div className="viz-tip" style={{ left: hover.x, top: 0 }}>
-          {hover.text}
-        </div>
-      ) : null}
+        {hover ? (
+          <div className="viz-tip" style={{ left: `${(hover.minute / 1440) * 100}%`, top: -6 }}>
+            {hover.text}
+          </div>
+        ) : null}
+      </div>
+      <div className="curve-hours">
+        {[0, 6, 12, 18, 24].map((h) => (
+          <span key={h}>{h}</span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -696,58 +598,53 @@ function ClaimsList(props: {
 }) {
   if (!props.polling && props.claims.length === 0) {
     return (
-      <div className="small muted pretty" style={{ padding: "8px 0", maxWidth: "68ch" }}>
-        Übernahmen erkennt der Hintergrund-Sammler am Wechsel des Zuständigen zwischen zwei Messungen —
-        dafür braucht es <span className="mono">TANSS_USERNAME</span>/<span className="mono">TANSS_PASSWORD</span> in der{" "}
-        <span className="mono">.env</span>.
-      </div>
+      <span className="muted pretty lead">
+        Übernahmen erkennt der Hintergrund-Sammler am Wechsel des Zuständigen zwischen zwei Messungen – dafür braucht es{" "}
+        <code>TANSS_USERNAME</code>/<code>TANSS_PASSWORD</code> in der <code>.env</code>.
+      </span>
     );
   }
   if (props.claims.length === 0) {
     return (
-      <div className="small muted" style={{ padding: "8px 0" }}>
-        Keine Übernahme gemessen — der Sammler vergleicht alle {props.interval} Minuten den Zuständigen.
-      </div>
+      <span className="muted">
+        Keine Übernahme gemessen – der Sammler vergleicht alle {props.interval} Minuten den Zuständigen.
+      </span>
     );
   }
   const byEmployee = claimsByEmployee(props.claims);
   const shown = props.claims.slice(0, CLAIMS_SHOWN);
   return (
-    <div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+    <div className="claims-block">
+      <div className="claim-chips">
         {byEmployee.map(({ name, count }) => (
-          <span key={name} className="chip">
+          <span key={name} className="claim-chip">
             {name} · {count}
           </span>
         ))}
       </div>
-      <div className="claims">
+      <div className="table">
         {shown.map((claim, i) => (
-          <div key={`${claim.day}-${claim.id}-${claim.minute}-${i}`} className="row tiny" style={{ gap: 8 }}>
-            <span className="mono muted" style={{ flex: "none", width: 96 }} title={formatShortDate(claim.day)}>
+          <div key={`${claim.day}-${claim.id}-${claim.minute}-${i}`} className="trow claim-row">
+            <span className="muted num-cell" title={formatShortDate(claim.day)}>
               {claim.day === props.today
                 ? clock(claim.minute)
                 : `${formatShortDate(claim.day).slice(0, 6)} ${clock(claim.minute)}`}
             </span>
-            <button className="btn ghost small mono" style={{ padding: "0 4px" }} onClick={() => props.onOpen(claim.id)}>
+            <button className="linkish strong" onClick={() => props.onOpen(claim.id)}>
               #{claim.id}
             </button>
-            <span className="small ellipsis" style={{ minWidth: 0 }}>{claim.title || "—"}</span>
-            <span className="small" style={{ flex: "none", marginLeft: "auto" }}>
-              → {claim.assigneeName}
+            <span className="ellipsis" title={claim.title}>{claim.title || "—"}</span>
+            <span className="claim-to">
+              → <strong>{claim.assigneeName}</strong>
               {claim.fromId > 0 ? <span className="muted"> (von {claim.fromName})</span> : null}
             </span>
           </div>
         ))}
-        {props.claims.length > shown.length ? (
-          <div className="tiny muted">
-            … {nf.format(props.claims.length - shown.length)} weitere im Zeitraum
-          </div>
-        ) : null}
-        <div className="tiny muted" style={{ marginTop: 2 }}>
-          Läuft fortlaufend mit — die Historie bleibt, auch wenn die Messwerte des Tages altern.
-        </div>
       </div>
+      {props.claims.length > shown.length ? (
+        <span className="tiny muted">… {nf.format(props.claims.length - shown.length)} weitere im Zeitraum</span>
+      ) : null}
+      <span className="tiny muted">Läuft fortlaufend mit – die Historie bleibt, auch wenn die Messwerte des Tages altern.</span>
     </div>
   );
 }
@@ -756,56 +653,37 @@ const WEEKDAY_ROWS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
 /** Weekday × hour intake — one hue, darker where more comes in. */
 function Heatmap(props: { grid: number[][] }) {
-  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   const max = Math.max(1, ...props.grid.flat());
   const total = props.grid.flat().reduce((a, b) => a + b, 0);
   if (total === 0) {
-    return <div className="small muted" style={{ padding: "18px 0" }}>Noch keine Eingänge gesammelt.</div>;
-  }
-  function show(event: React.MouseEvent, day: number, hour: number) {
-    const rect = wrapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setTip({
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top - 28,
-      text: `${WEEKDAY_ROWS[day]} ${hour}–${hour + 1} Uhr · ${nf.format(props.grid[day][hour])}`,
-    });
+    return <div className="empty-inline">Noch keine Eingänge gesammelt.</div>;
   }
   return (
-    <div ref={wrapRef} style={{ position: "relative" }} onMouseLeave={() => setTip(null)}>
+    <div className="heat" role="img" aria-label="Eingang nach Wochentag und Stunde">
       {props.grid.map((rowValues, day) => (
-        <div key={day} className="heat-row">
-          <span className="tiny muted heat-label">{WEEKDAY_ROWS[day]}</span>
+        <div key={day} className="heat-line">
+          <span className="heat-day">{WEEKDAY_ROWS[day]}</span>
           {rowValues.map((value, hour) => (
             <span
               key={hour}
-              className="heat-cell"
+              className="heat-box"
+              title={`${WEEKDAY_ROWS[day]} ${hour}–${hour + 1} Uhr · ${nf.format(value)}`}
               style={{
                 background:
-                  value > 0
-                    ? `color-mix(in oklch, var(--viz-1) ${Math.round(15 + (value / max) * 80)}%, var(--surface))`
-                    : "transparent",
+                  value > 0 ? `color-mix(in oklch, var(--ink) ${Math.round(12 + (value / max) * 80)}%, var(--bg))` : "var(--soft)",
               }}
-              onMouseEnter={(e) => show(e, day, hour)}
-              onMouseMove={(e) => show(e, day, hour)}
             />
           ))}
         </div>
       ))}
-      <div className="heat-row">
-        <span className="heat-label" />
+      <div className="heat-line">
+        <span />
         {Array.from({ length: 24 }, (_, hour) => (
-          <span key={hour} className="tiny muted heat-hour">
+          <span key={hour} className="heat-hour-label">
             {hour % 6 === 0 ? hour : ""}
           </span>
         ))}
       </div>
-      {tip ? (
-        <div className="viz-tip" style={{ left: tip.x, top: tip.y }}>
-          {tip.text}
-        </div>
-      ) : null}
     </div>
   );
 }

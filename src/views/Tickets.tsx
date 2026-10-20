@@ -35,6 +35,8 @@ import { rangeSelection } from "../../shared/selection.ts";
 import { loadActiveTab, loadViews, newViewId, storeActiveTab, storeViews } from "../savedViews.ts";
 import { AgentPanel } from "./AgentPanel.tsx";
 import { DraftButton } from "./DraftButton.tsx";
+import { CheckBox, Dot, Icon, PageHeader } from "../ui/kit.tsx";
+import "../styles/tickets.css";
 
 type Props = {
   query: string;
@@ -52,6 +54,39 @@ type Props = {
 };
 
 const ACTIVITY_LOOKBACK = 365;
+
+type ColumnId = "source" | "id" | "title" | "customer" | "status" | "type" | "assignee" | "department" | "age" | "idle" | "updated";
+type ColumnDef = { id: ColumnId; label: string; width: string; min: number };
+
+/** Every column the board can show, in order; the grid is built from the visible ones. */
+const COLUMNS: ColumnDef[] = [
+  { id: "source", label: "Quelle", width: "80px", min: 80 },
+  { id: "id", label: "ID", width: "84px", min: 84 },
+  { id: "title", label: "Betreff", width: "minmax(280px, 1fr)", min: 280 },
+  { id: "customer", label: "Kunde", width: "170px", min: 170 },
+  { id: "status", label: "Status", width: "160px", min: 160 },
+  { id: "type", label: "Typ", width: "120px", min: 120 },
+  { id: "assignee", label: "Zuständig", width: "150px", min: 150 },
+  { id: "department", label: "Abteilung", width: "130px", min: 130 },
+  { id: "age", label: "Alter", width: "72px", min: 72 },
+  { id: "idle", label: "Inaktiv", width: "80px", min: 80 },
+  { id: "updated", label: "Aktualisiert", width: "104px", min: 104 },
+];
+const DEFAULT_COLUMNS: ColumnId[] = ["id", "title", "customer", "status", "type", "assignee", "age", "idle", "updated"];
+const COLUMNS_KEY = "agent-portal:columns";
+
+function loadColumns(): ColumnId[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLUMNS_KEY) ?? "null") as unknown;
+    if (Array.isArray(stored)) {
+      const known = stored.filter((id): id is ColumnId => COLUMNS.some((c) => c.id === id));
+      if (known.length) return known;
+    }
+  } catch {
+    /* private mode or junk: fall back */
+  }
+  return DEFAULT_COLUMNS;
+}
 
 const ids = (list: number[]) => [...new Set(list)];
 
@@ -73,7 +108,9 @@ export function TicketsView(props: Props) {
   // "Due on X" means "by the end of business" — the field says so and stays editable.
   const [dueTime, setDueTime] = useState("17:00");
   const [filters, setFilters] = useState<ColumnFilters>(EMPTY_FILTERS);
-  const [openFilter, setOpenFilter] = useState<FilterKey | null>(null);
+  /** The open dropdown: a column filter or the column picker. */
+  const [openFilter, setOpenFilter] = useState<FilterKey | "__columns" | null>(null);
+  const [columns, setColumns] = useState<ColumnId[]>(loadColumns);
   const [views, setViews] = useState<SavedView[]>([]);
   const [activeView, setActiveView] = useState<string | null>(null);
   const [saveName, setSaveName] = useState<string | null>(null);
@@ -172,6 +209,19 @@ export function TicketsView(props: Props) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [openFilter]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLUMNS_KEY, JSON.stringify(columns));
+    } catch {
+      /* ignore */
+    }
+  }, [columns]);
+
+  function toggleColumn(id: ColumnId) {
+    if (id === "title") return;
+    setColumns((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+  }
 
   // Minutes go stale in a way days never did: tick once a minute so the age
   // and idle columns keep telling the truth without a reload. No request.
@@ -473,307 +523,385 @@ export function TicketsView(props: Props) {
   }, [active, visible, focus, selected.length, anchor, employeeId, saveName, openFilter, commentOpen, statusPick, duePick]);
 
   const allSelected = visible.length > 0 && visible.every((row) => selected.includes(row.id));
+  const shown = COLUMNS.filter((c) => c.id === "title" || columns.includes(c.id));
+  const gridTemplate = `44px ${shown.map((c) => c.width).join(" ")}`;
+  const gridMinWidth = 44 + shown.reduce((sum, c) => sum + c.min, 0);
+  const firstRank = Math.min(...(props.meta?.states ?? []).map((s) => s.rank));
+  const statusTone = (row: TicketRow): "warn" | "flat" | "ink" => {
+    if (row.waiting) return "warn";
+    const state = props.meta?.states.find((s) => s.id === row.statusId);
+    return state && state.rank === firstRank ? "flat" : "ink";
+  };
+  const me = { id: employeeId, name: employeeName };
+  const listCount = (id: ListId) => applyFilters(rowsForList(rows, id), presetFilters(id, rows, me)).length;
+
+  function cell(row: TicketRow, column: ColumnId, tone: string) {
+    const due = row.deadlineDate || row.dueDate;
+    switch (column) {
+      case "source":
+        return <span className="small muted">TANSS</span>;
+      case "id":
+        return <span className="muted num-cell">#{row.id}</span>;
+      case "title":
+        return (
+          <span className="tk-title">
+            <span className="text">{row.title}</span>
+            {row.isProject ? <span className="chip">Projekt</span> : null}
+            {due ? (
+              <span className={`chip mono${tone === "overdue" ? " danger" : ""}`} title={row.deadlineDate ? "Deadline" : "Fällig"}>
+                {tone === "overdue" ? <Dot tone="danger" size={6} /> : null}
+                {row.deadlineDate ? "Deadline " : "fällig "}
+                {fullDate(due).slice(0, 6)}
+              </span>
+            ) : null}
+          </span>
+        );
+      case "customer":
+        return (
+          <span className="muted ellipsis tk-pad">
+            {row.companyName || "—"}
+            {row.projectName ? <span className="tiny"> · {row.projectName}</span> : null}
+          </span>
+        );
+      case "status":
+        return (
+          <span className="tk-status">
+            <Dot tone={statusTone(row)} />
+            <span className="ellipsis">{row.statusName || "—"}</span>
+          </span>
+        );
+      case "type":
+        return <span className="muted ellipsis tk-pad">{row.typeName || "—"}</span>;
+      case "assignee":
+        return row.assigneeId ? (
+          <span className="ellipsis tk-pad">{row.assigneeName || `#${row.assigneeId}`}</span>
+        ) : (
+          <span>
+            <span className="assignee-suggest" title="Kein Mitarbeiter zugewiesen">offen</span>
+          </span>
+        );
+      case "department":
+        return <span className="muted ellipsis tk-pad">{row.departmentName || "—"}</span>;
+      case "age":
+        return (
+          <span className="num muted" title={row.creationDate ? `Angelegt ${dayAndClock(row.creationDate)}` : ""}>
+            {formatElapsed(row.creationDate, now)}
+          </span>
+        );
+      case "idle": {
+        const idle = idleOf(row);
+        if (!idle) {
+          return (
+            <span className="num muted" title={activityPending.has(row.id) ? "Verlauf wird geladen" : ""}>
+              {activityError && !activityPending.has(row.id) ? "—" : "…"}
+            </span>
+          );
+        }
+        const a = activityMap[row.id] ?? NONE;
+        const idleTone = idle.days >= 30 ? " dead" : idle.days >= 7 ? " stale" : "";
+        const title = a.at
+          ? `Letzte Spur: ${activityLabel(a.kind)} am ${dayAndClock(a.at)}`
+          : a.historyRead
+            ? "Keine Kommentare oder Leistungen seit Anlage"
+            : `Verlauf nicht lesbar; keine Leistung in den letzten ${ACTIVITY_LOOKBACK} Tagen`;
+        return (
+          <span className={`num${idleTone}`} title={title}>
+            {idle.atLeast ? `> ${idle.days} d` : formatElapsed(idle.at, now)}
+          </span>
+        );
+      }
+      case "updated":
+        return <span className="num muted updated">{formatUpdated(row.modified, now)}</span>;
+    }
+  }
+
+  function head(column: ColumnDef) {
+    if (column.id === "age" || column.id === "idle") {
+      const key = column.id;
+      return (
+        <span
+          key={key}
+          className={`num sortable${sort === key ? " on" : ""}`}
+          title={key === "age" ? "Tage seit Anlage · klicken zum Sortieren" : "Tage seit letztem Kommentar oder letzter Leistung · klicken zum Sortieren"}
+          onClick={() => setSort(sort === key ? "modified" : key)}
+        >
+          {column.label}
+          {sort === key ? " ↓" : ""}
+        </span>
+      );
+    }
+    return (
+      <span key={column.id} className={column.id === "updated" ? "num" : undefined}>
+        {column.label}
+      </span>
+    );
+  }
+
+  const listLabel = currentView?.name ?? LISTS.find((l) => l.id === list)?.label ?? list;
+  const subtitle = loading ? "lädt …" : `${visible.length} Einträge · ${listLabel}`;
 
   return (
-    <div>
-      <div className="board-head">
-        {LISTS.map((item) => (
-          <button
-            key={item.id}
-            className={`tab${list === item.id && !activeView ? " active" : ""}`}
-            onClick={() => selectList(item.id)}
-          >
-            {item.label}
-            {list === item.id && !activeView ? <span className="count">{visible.length}</span> : null}
-          </button>
-        ))}
-        {views.map((view) => (
-          <button
-            key={view.id}
-            className={`tab${activeView === view.id ? " active" : ""}`}
-            onClick={() => selectView(view)}
-            title={`${LISTS.find((l) => l.id === view.list)?.label} · ${FILTER_COLUMNS.filter((c) => view.filters[c.key].length).map((c) => `${c.label}: ${view.filters[c.key].join(", ")}`).join(" · ") || "ohne Filter"}`}
-          >
-            {view.name}
-            {activeView === view.id && viewDirty ? (
-              <span title="Filter geändert, noch nicht gespeichert" style={{ color: "var(--warn)", marginLeft: 4 }}>•</span>
-            ) : null}
-            {activeView === view.id ? <span className="count">{visible.length}</span> : null}
-            <span
-              className="x"
-              role="button"
-              aria-label={`Liste ${view.name} löschen`}
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteView(view.id);
-              }}
-            >
-              ×
+    <div className="tk-page">
+      <div className="tk-top">
+        <PageHeader title="Tickets" subtitle={subtitle} />
+
+        <div className="tk-controls">
+          <div className="seg" role="tablist" aria-label="Listen">
+            {LISTS.map((item) => {
+              const on = list === item.id && !activeView;
+              return (
+                <button key={item.id} role="tab" aria-selected={on} className={`seg-item${on ? " active" : ""}`} onClick={() => selectList(item.id)}>
+                  {item.label}
+                  <span className="count">{on ? visible.length : listCount(item.id)}</span>
+                </button>
+              );
+            })}
+            {views.map((view) => {
+              const on = activeView === view.id;
+              return (
+                <button
+                  key={view.id}
+                  role="tab"
+                  aria-selected={on}
+                  className={`seg-item tk-saved${on ? " active" : ""}`}
+                  onClick={() => selectView(view)}
+                  title={`${LISTS.find((l) => l.id === view.list)?.label} · ${FILTER_COLUMNS.filter((c) => view.filters[c.key].length).map((c) => `${c.label}: ${view.filters[c.key].join(", ")}`).join(" · ") || "ohne Filter"}`}
+                >
+                  {view.name}
+                  {on && viewDirty ? (
+                    <span className="tk-dirty" title="Filter geändert, noch nicht gespeichert">•</span>
+                  ) : null}
+                  {on ? <span className="count">{visible.length}</span> : null}
+                  <span
+                    className="tk-x"
+                    role="button"
+                    aria-label={`Liste ${view.name} löschen`}
+                    title="Liste löschen"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteView(view.id);
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              );
+            })}
+            {currentView && viewDirty ? null : (
+              <button className="seg-item tk-add" onClick={() => setSaveName("")} title="Aktuelle Filter als Liste speichern">
+                + Liste
+              </button>
+            )}
+          </div>
+          {currentView && viewDirty ? (
+            <span className="row" style={{ gap: 6 }}>
+              <button className="btn primary small" onClick={() => saveView(currentView.name)} title="Geänderte Filter in diese Liste übernehmen">
+                „{currentView.name}" speichern
+              </button>
+              <button className="btn small" onClick={() => setSaveName("")} title="Als neue Liste speichern">
+                als neue Liste
+              </button>
             </span>
-          </button>
-        ))}
-        {currentView && viewDirty ? (
-          <span className="row" style={{ marginLeft: 8, gap: 4 }}>
-            <button className="btn agent" onClick={() => saveView(currentView.name)} title="Geänderte Filter in diese Liste übernehmen">
-              „{currentView.name}" speichern
-            </button>
-            <button className="btn ghost small" onClick={() => setSaveName("")} title="Als neue Liste speichern">
-              als neue Liste
-            </button>
-          </span>
-        ) : (
-          <button className="tab" style={{ marginLeft: 8 }} onClick={() => setSaveName("")} title="Aktuelle Filter als Liste speichern">
-            + Liste
-          </button>
-        )}
+          ) : null}
+
+          <div className="tk-filters">
+            {FILTER_COLUMNS.map((column) => {
+              const chosen = filters[column.key];
+              const options = columnOptions(rows, column.key);
+              return (
+                <div key={column.key} className="filter-wrap" data-filter={column.key}>
+                  <button
+                    className={`filter-chip${chosen.length ? " on" : ""}`}
+                    onClick={() => setOpenFilter(openFilter === column.key ? null : column.key)}
+                  >
+                    <span>{column.label}</span>
+                    <span className="value ellipsis" style={{ maxWidth: 180 }}>
+                      {chosen.length === 0 ? "alle" : chosen.length === 1 ? chosen[0] : `${chosen.length} gewählt`}
+                    </span>
+                    <Icon d="m6 9 6 6 6-6" size={12} stroke={2} />
+                  </button>
+                  {openFilter === column.key ? (
+                    <div className="filter-menu tk-menu">
+                      {options.length === 0 ? <div className="popover-label">keine Werte</div> : null}
+                      {options.map((option) => {
+                        const on = chosen.includes(option.value);
+                        return (
+                          <button
+                            key={option.value}
+                            className="filter-option"
+                            onClick={() => setFilters(toggleValue(filters, column.key, option.value))}
+                          >
+                            <CheckBox on={on} />
+                            <span className="ellipsis">{option.value}</span>
+                            <span className="n">{option.count}</span>
+                          </button>
+                        );
+                      })}
+                      {chosen.length ? (
+                        <button className="filter-option muted" onClick={() => setFilters({ ...filters, [column.key]: [] })}>
+                          zurücksetzen
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            <div className="filter-wrap" data-filter="__columns">
+              <button className="filter-chip" onClick={() => setOpenFilter(openFilter === "__columns" ? null : "__columns")} title="Sichtbare Spalten">
+                <Icon d="M12 3v18M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" size={16} />
+                <span className="value">Spalten</span>
+              </button>
+              {openFilter === "__columns" ? (
+                <div className="popover tk-cols">
+                  <span className="popover-label">Sichtbare Spalten</span>
+                  {COLUMNS.map((c) => {
+                    const on = c.id === "title" || columns.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        className="popover-item"
+                        disabled={c.id === "title"}
+                        title={c.id === "title" ? "Der Betreff bleibt immer sichtbar" : undefined}
+                        onClick={() => toggleColumn(c.id)}
+                      >
+                        <CheckBox on={on} />
+                        <span>{c.label}</span>
+                      </button>
+                    );
+                  })}
+                  <button className="popover-item muted" onClick={() => setColumns(DEFAULT_COLUMNS)}>
+                    Standard wiederherstellen
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {hasFilters(filters) ? (
+              <button className="linkish muted" onClick={() => setFilters(EMPTY_FILTERS)}>
+                Filter löschen
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {!loading && rows.length > 0 ? (
+          <AgentPanel
+            ready={props.agentReady}
+            rows={rows}
+            visible={visible}
+            activity={activityMap}
+            listKey={activeView ?? list}
+            listLabel={listLabel}
+            onOpen={onOpen}
+            onError={onError}
+          />
+        ) : null}
+
+        {coverageNotes.length ? (
+          <div className="tk-notes">
+            {coverageNotes.map((note) => (
+              <span key={note} className="row small muted">
+                <Dot tone="warn" />
+                {note}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      <div className="board-filters">
-        {FILTER_COLUMNS.map((column) => {
-          const selected = filters[column.key];
-          const options = columnOptions(rows, column.key);
+      <div className="tk-grid" style={{ minWidth: gridMinWidth + 64 }}>
+        <div className="tk-head" style={{ gridTemplateColumns: gridTemplate }}>
+          <span>
+            <button
+              className="tk-check"
+              aria-label="Alle wählen"
+              onClick={() => {
+                setAnchor(null);
+                setSelected(allSelected ? [] : visible.map((r) => r.id));
+              }}
+            >
+              <CheckBox on={allSelected} />
+            </button>
+          </span>
+          {shown.map(head)}
+        </div>
+
+        {loading && rows.length === 0 ? <div className="tk-empty">Lädt aus TANSS …</div> : null}
+        {!loading && visible.length === 0 ? (
+          <div className="tk-empty">
+            {props.query
+              ? `Keine Tickets für „${props.query}“.`
+              : hasFilters(filters) && base.length
+                ? "Nichts passt zu den Filtern."
+                : "Diese Liste ist in TANSS leer."}
+          </div>
+        ) : null}
+
+        {visible.map((row, index) => {
+          const isSelected = selected.includes(row.id);
+          const tone = rowTone(row, now);
           return (
-            <div key={column.key} className="filter-wrap" data-filter={column.key}>
+            <div
+              key={row.id}
+              className={`tk-row ${tone}${index === focus ? " focused" : ""}${isSelected ? " selected" : ""}`}
+              style={{ gridTemplateColumns: gridTemplate }}
+              onClick={(e) => {
+                // With shift the row selects instead of opening; the browser
+                // would otherwise paint a text range across the list.
+                if (!e.shiftKey) return onOpen(row.id);
+                e.preventDefault();
+                pick(row.id, true);
+              }}
+              onMouseEnter={() => setFocus(index)}
+            >
               <button
-                className={`filter-chip${selected.length ? " on" : ""}`}
-                onClick={() => setOpenFilter(openFilter === column.key ? null : column.key)}
+                className="tk-check"
+                aria-label="wählen"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  pick(row.id, e.shiftKey);
+                }}
               >
-                <span>{column.label}</span>
-                <span className="value ellipsis" style={{ maxWidth: 180 }}>
-                  {selected.length === 0 ? "alle" : selected.length === 1 ? selected[0] : `${selected.length} gewählt`}
-                </span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
+                <CheckBox on={isSelected} />
               </button>
-              {openFilter === column.key ? (
-                <>
-                  <div className="filter-menu">
-                    {options.length === 0 ? <div className="palette-group">keine Werte</div> : null}
-                    {options.map((option) => {
-                      const on = selected.includes(option.value);
-                      return (
-                        <button
-                          key={option.value}
-                          className="filter-option"
-                          onClick={() => setFilters(toggleValue(filters, column.key, option.value))}
-                        >
-                          <span className={`checkbox${on ? " on" : ""}`}>{on ? <Check /> : null}</span>
-                          <span className="ellipsis">{option.value}</span>
-                          <span className="n">{option.count}</span>
-                        </button>
-                      );
-                    })}
-                    {selected.length ? (
-                      <button
-                        className="filter-option muted"
-                        onClick={() => setFilters({ ...filters, [column.key]: [] })}
-                      >
-                        zurücksetzen
-                      </button>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
+              {shown.map((c) => (
+                <span key={c.id} className="tk-cell">
+                  {cell(row, c.id, tone)}
+                </span>
+              ))}
             </div>
           );
         })}
-        {hasFilters(filters) ? (
-          <button className="btn ghost small" onClick={() => setFilters(EMPTY_FILTERS)}>
-            Filter löschen
-          </button>
-        ) : null}
-        <span className="small muted" style={{ marginLeft: "auto" }}>
-          j/k Fokus · x wählen · ⏎ öffnen · a mir zuweisen · s Status · c Kommentar
-        </span>
-      </div>
-
-      {!loading && rows.length > 0 ? (
-        <AgentPanel
-          ready={props.agentReady}
-          rows={rows}
-          visible={visible}
-          activity={activityMap}
-          listKey={activeView ?? list}
-          listLabel={currentView?.name ?? LISTS.find((l) => l.id === list)?.label ?? list}
-          onOpen={onOpen}
-          onError={onError}
-        />
-      ) : null}
-
-      <div className="grid-cols grid-head">
-        <span>
-          <button
-            className={`checkbox${allSelected ? " on" : ""}`}
-            aria-label="Alle wählen"
-            onClick={() => {
-              setAnchor(null);
-              setSelected(allSelected ? [] : visible.map((r) => r.id));
-            }}
-          >
-            {allSelected ? <Check /> : null}
-          </button>
-        </span>
-        <span>Quelle</span>
-        <span>ID</span>
-        <span>Betreff</span>
-        <span>Kunde / Projekt</span>
-        <span>Status</span>
-        <span>Typ</span>
-        <span>Zuständig</span>
-        <span>Abteilung</span>
-        <span
-          className={`num sortable${sort === "age" ? "" : " muted"}`}
-          title="Tage seit Anlage · klicken zum Sortieren"
-          onClick={() => setSort(sort === "age" ? "modified" : "age")}
-        >
-          Alter{sort === "age" ? " ↓" : ""}
-        </span>
-        <span
-          className={`num sortable${sort === "idle" ? "" : " muted"}`}
-          title="Tage seit letztem Kommentar oder letzter Leistung · klicken zum Sortieren"
-          onClick={() => setSort(sort === "idle" ? "modified" : "idle")}
-        >
-          Inaktiv{sort === "idle" ? " ↓" : ""}
-        </span>
-        <span style={{ textAlign: "right" }}>Aktual.</span>
-      </div>
-
-      {coverageNotes.length ? (
-        <div className="board-filters" style={{ background: "transparent" }}>
-          {coverageNotes.map((note) => (
-            <span key={note} className="row small muted">
-              <span className="dot xs warn" />
-              {note}
-            </span>
-          ))}
+        <div className="tk-keys tiny muted">
+          j/k Fokus · x wählen (Shift: Bereich) · ⏎ öffnen · a mir zuweisen · s Status · f Fällig · c Kommentar · Esc Auswahl aufheben
         </div>
-      ) : null}
-
-      {!loading && visible.length === 0 ? (
-        <div className="empty" style={{ margin: 16 }}>
-          <div className="title">Keine Tickets.</div>
-          <div className="small muted">
-            {props.query ? "Nichts passt zum Filter." : "Diese Liste ist in TANSS leer."}
-          </div>
-        </div>
-      ) : null}
-
-      {visible.map((row, index) => {
-        const isSelected = selected.includes(row.id);
-        const tone = rowTone(row, now);
-        const due = row.deadlineDate || row.dueDate;
-        return (
-          <div
-            key={row.id}
-            className={`grid-cols grid-row ${tone}${index === focus ? " focused" : ""}${isSelected ? " selected" : ""}`}
-            onClick={(e) => {
-              // With shift the row selects instead of opening; the browser
-              // would otherwise paint a text range across the list.
-              if (!e.shiftKey) return onOpen(row.id);
-              e.preventDefault();
-              pick(row.id, true);
-            }}
-            onMouseEnter={() => setFocus(index)}
-          >
-            <button
-              className={`checkbox${isSelected ? " on" : ""}`}
-              aria-label="wählen"
-              onClick={(e) => {
-                e.stopPropagation();
-                pick(row.id, e.shiftKey);
-              }}
-            >
-              {isSelected ? <Check /> : null}
-            </button>
-            <span className="badge">TANSS</span>
-            <span className="mono small muted">#{row.id}</span>
-            <span className="cell-title">
-              <span className="text ellipsis">{row.title}</span>
-              <span className="chips">
-                {row.isProject ? <span className="chip">Projekt</span> : null}
-                {due ? (
-                  <span className={`chip mono${tone === "overdue" ? " danger" : ""}`} title={row.deadlineDate ? "Deadline" : "Fällig"}>
-                    {row.deadlineDate ? "! " : ""}
-                    {fullDate(due).slice(0, 6)}
-                  </span>
-                ) : null}
-              </span>
-            </span>
-            <span className="muted ellipsis" style={{ paddingRight: 10 }}>
-              {row.companyName || "—"}
-              {row.projectName ? <span className="tiny"> · {row.projectName}</span> : null}
-            </span>
-            <span>
-              <span className={`status-pill${row.waiting ? " waiting" : ""}`}>{row.statusName || "—"}</span>
-            </span>
-            <span className="small muted ellipsis">{row.typeName || "—"}</span>
-            {row.assigneeId ? (
-              <span className="small muted ellipsis">{row.assigneeName || `#${row.assigneeId}`}</span>
-            ) : (
-              <span className="assignee-suggest" title="Kein Mitarbeiter zugewiesen">offen</span>
-            )}
-            <span className="small muted ellipsis">{row.departmentName || "—"}</span>
-            <span className="num muted" title={row.creationDate ? `Angelegt ${dayAndClock(row.creationDate)}` : ""}>
-              {formatElapsed(row.creationDate, now)}
-            </span>
-            {(() => {
-              const idle = idleOf(row);
-              if (!idle) {
-                return (
-                  <span className="num muted" title={activityPending.has(row.id) ? "Verlauf wird geladen" : ""}>
-                    {activityError && !activityPending.has(row.id) ? "—" : "…"}
-                  </span>
-                );
-              }
-              const a = activityMap[row.id] ?? NONE;
-              const tone = idle.days >= 30 ? " dead" : idle.days >= 7 ? " stale" : "";
-              const title = a.at
-                ? `Letzte Spur: ${activityLabel(a.kind)} am ${dayAndClock(a.at)}`
-                : a.historyRead
-                  ? "Keine Kommentare oder Leistungen seit Anlage"
-                  : `Verlauf nicht lesbar; keine Leistung in den letzten ${ACTIVITY_LOOKBACK} Tagen`;
-              return (
-                <span className={`num${tone}`} title={title}>
-                  {idle.atLeast ? `> ${idle.days} d` : formatElapsed(idle.at, now)}
-                </span>
-              );
-            })()}
-            <span className="mono small muted updated" style={{ textAlign: "right" }}>
-              {formatUpdated(row.modified, now)}
-            </span>
-          </div>
-        );
-      })}
-      <div className="spacer" />
+      </div>
 
       {selected.length ? (
-        <div className="selection-bar">
-          <span className="mono small" style={{ paddingRight: 4 }}>
-            {selected.length} ausgewählt
-          </span>
-          <span className="sep" />
-          <button className="btn" disabled={busy} onClick={assignToMe}>
-            Mir zuweisen <span className="kbd">A</span>
+        <div className="tk-selbar" role="toolbar" aria-label="Auswahl">
+          <span className="count">{selected.length} ausgewählt</span>
+          <button className="tk-selbtn" disabled={busy} onClick={assignToMe} title="Mir zuweisen (A)">
+            Mir zuweisen
           </button>
-          <button className="btn" disabled={busy} onClick={() => setStatusPick(true)}>
-            Status <span className="kbd">S</span>
+          <button className="tk-selbtn" disabled={busy} onClick={() => setStatusPick(true)} title="Status ändern (S)">
+            Status ändern
           </button>
           <button
-            className="btn"
+            className="tk-selbtn"
             disabled={busy}
             onClick={() => {
               setDueDay(todayYmd());
               setDuePick(true);
             }}
+            title="Fälligkeit setzen (F)"
           >
-            Fällig <span className="kbd">F</span>
+            Fällig
           </button>
-          <button className="btn" disabled={busy} onClick={() => setCommentOpen(true)}>
-            Kommentar <span className="kbd">C</span>
+          <button className="tk-selbtn" disabled={busy} onClick={() => setCommentOpen(true)} title="Kommentar schreiben (C)">
+            Kommentar
           </button>
-          <button className="btn ghost" onClick={clearSelection}>
-            Esc
+          <button className="tk-selbtn done" onClick={clearSelection} title="Auswahl aufheben (Esc)">
+            Fertig
           </button>
         </div>
       ) : null}
@@ -946,13 +1074,5 @@ export function TicketsView(props: Props) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-function Check() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" strokeWidth="3">
-      <path d="m5 13 4 4L19 7" />
-    </svg>
   );
 }

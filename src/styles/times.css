@@ -1,0 +1,154 @@
+/* Zeiten: day timeline with drag-to-book and the floating booking card
+   (prototype screen "Zeiten" in docs/design/Agent-Portal-Redesign.dc.html). */
+
+.times-view { padding: 32px; display: flex; flex-direction: column; gap: 24px; max-width: 1240px; }
+.times-view .page-head-actions .btn.round {
+  width: 40px; height: 40px; padding: 0; justify-content: center; font-size: 16px;
+}
+.times-meter { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--body); margin-top: -8px; }
+.times-meter .meter { flex: 0 1 240px; min-width: 120px; height: 8px; border-radius: 999px; background: var(--pressed); overflow: hidden; }
+.times-meter .meter i { display: block; height: 100%; background: var(--ink); border-radius: 999px; }
+.times-meter b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.times-layout { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+
+/* ---- timeline ---------------------------------------------------------------- */
+.tl {
+  flex: 1 1 520px; min-width: 0; position: relative; border-top: 2px solid var(--ink);
+  cursor: crosshair; user-select: none; -webkit-user-select: none;
+}
+.tl-hour { position: absolute; left: 56px; right: 0; height: 1px; background: var(--line); pointer-events: none; }
+.tl-hour span {
+  position: absolute; left: -56px; top: -9px; width: 48px; font-size: 12px; line-height: 18px;
+  color: var(--body); font-variant-numeric: tabular-nums;
+}
+.tl-now { position: absolute; left: 56px; right: 0; height: 0; border-top: 2px solid var(--red); pointer-events: none; z-index: 2; }
+.tl-now span {
+  position: absolute; left: -56px; top: -10px; width: 48px; font-size: 12px; font-weight: 500;
+  color: var(--red); font-variant-numeric: tabular-nums; background: var(--bg);
+}
+.tl-block {
+  position: absolute; left: 64px; right: 0; border-radius: 12px; overflow: hidden; cursor: pointer;
+  background: var(--primary); color: var(--on-primary); padding: 8px 14px;
+  display: flex; flex-direction: column; gap: 2px; transition: background 150ms ease; z-index: 1;
+}
+.tl-block:hover { background: var(--primary-hover); }
+.tl-block.short { flex-direction: row; align-items: center; gap: 10px; padding: 0 14px; }
+.tl-block .t { font-size: 12px; line-height: 16px; opacity: 0.75; font-variant-numeric: tabular-nums; white-space: nowrap; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tl-block .l { font-size: 14px; line-height: 18px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tl-block .tk {
+  background: transparent; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.tl-gap {
+  position: absolute; left: 64px; right: 0; border-radius: 12px; border: 1.5px dashed var(--line);
+  padding: 6px 14px; overflow: hidden; display: flex; align-items: flex-start;
+  font-size: 12px; line-height: 16px; color: var(--mute); font-variant-numeric: tabular-nums;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.tl-gap.short { align-items: center; padding: 0 14px; }
+.tl-gap:hover { border-color: var(--mute); color: var(--body); background: color-mix(in oklch, var(--soft) 60%, transparent); }
+.tl-sel {
+  position: absolute; left: 64px; right: 0; border-radius: 12px; border: 2px solid var(--ink);
+  background: var(--soft2); padding: 8px 14px; display: flex; flex-direction: column; gap: 2px;
+  pointer-events: none; z-index: 3; overflow: hidden;
+}
+.tl-sel.short { flex-direction: row; align-items: center; gap: 10px; padding: 0 14px; }
+.tl-sel .t { font-size: 12px; line-height: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.tl-sel .d { font-size: 14px; font-weight: 500; }
+.tl-empty { position: absolute; left: 72px; top: 20px; color: var(--body); font-size: 13px; pointer-events: none; }
+.tl-form {
+  position: absolute; left: 64px; width: min(560px, calc(100% - 64px)); z-index: 6;
+  background: var(--bg); border-radius: 16px; box-shadow: var(--shadow); padding: 20px;
+  cursor: default; user-select: text; -webkit-user-select: text;
+}
+.tl-outside { font-size: 13px; color: var(--body); }
+
+/* ---- booking form (also the compact one in the ticket drawer) -------------- */
+.booking-form .input.bad { border-bottom-color: var(--red); }
+.booking-form .bf-label-row { display: flex; justify-content: space-between; gap: 8px; }
+.booking-form .bf-label-hint { font-weight: 400; color: var(--body); font-variant-numeric: tabular-nums; }
+.booking-form .bf-target { max-width: 360px; min-width: 0; }
+.booking-form .bf-hits {
+  display: flex; flex-direction: column; max-height: 180px; overflow: auto; background: var(--bg);
+  border-radius: 12px; box-shadow: var(--shadow); padding: 6px; margin-top: 4px;
+}
+.booking-form .bf-hit {
+  display: flex; align-items: center; gap: 10px; background: transparent; border: 0; border-radius: 8px;
+  padding: 8px 10px; text-align: left; cursor: pointer; font-size: 14px; color: var(--ink); min-width: 0;
+}
+.booking-form .bf-hit:hover { background: var(--soft); }
+.booking-form .bf-kind {
+  flex: none; background: var(--soft2); border-radius: 999px; padding: 2px 8px;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
+}
+.booking-form .bf-draft { gap: 6px; }
+.booking-form .bf-options { gap: 12px; flex-wrap: wrap; font-size: 14px; }
+.booking-form .bf-check {
+  display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 0;
+  cursor: pointer; color: var(--ink); font-size: 14px;
+}
+.booking-form .bf-check .checkbox { width: 16px; height: 16px; border-radius: 5px; }
+.booking-form .bf-nc { width: 64px; padding: 6px 10px; }
+.booking-form .bf-clash { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 16px; color: var(--body); }
+.booking-form .bf-clash .dot { margin-top: 4px; }
+.booking-form .bf-lock { display: flex; align-items: center; gap: 8px; background: var(--soft); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
+.booking-form .bf-book.dim { opacity: 0.45; }
+
+.booking-form.floating { padding: 0; gap: 12px 16px; }
+.booking-form.floating .bf-head { display: flex; align-items: baseline; gap: 10px; }
+.booking-form.floating .bf-title { font-size: 18px; line-height: 24px; font-weight: 700; font-feature-settings: "ss01"; }
+.booking-form.floating .bf-close {
+  margin-left: auto; width: 32px; height: 32px; border-radius: 999px; border: 0; background: transparent;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--ink); align-self: center;
+}
+.booking-form.floating .bf-close:hover { background: var(--soft); }
+.booking-form.floating .chip.agent { font-size: 13px; padding: 6px 12px; }
+.booking-form.floating .bf-foot { border-top: 1px solid var(--line); padding-top: 14px; }
+.booking-form.floating .bf-book { padding: 10px 18px; }
+
+/* ---- aside: suggestions, templates, open time ------------------------------ */
+.times-aside { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.times-aside .aside-head { display: flex; align-items: center; gap: 10px; }
+.times-aside .aside-head h2 { font-size: 20px; line-height: 28px; }
+.times-aside .aside-head .btn { margin-left: auto; }
+.times-aside h3 { margin: 12px 0 0; font-size: 16px; line-height: 20px; font-weight: 500; font-feature-settings: normal; }
+.sugg { background: var(--soft); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.sugg-top { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--body); min-width: 0; }
+.sugg-top .kind { color: var(--ink); font-weight: 500; }
+.sugg-top .span { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sugg-text { font-size: 16px; line-height: 24px; text-wrap: pretty; }
+.sugg-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sugg-actions .buttons { margin-left: auto; display: flex; gap: 8px; }
+.sugg-min { display: inline-flex; align-items: center; background: var(--bg); border-radius: 999px; padding: 0 4px 0 12px; }
+.sugg-min input {
+  width: 40px; background: transparent; border: 0; outline: 0; font-size: 14px; font-weight: 500;
+  padding: 8px 0; font-variant-numeric: tabular-nums;
+}
+.sugg-min span { color: var(--body); font-size: 13px; padding-right: 10px; }
+.sugg-evidence { font-size: 12px; line-height: 16px; color: var(--body); text-wrap: pretty; }
+.sugg-note { font-size: 13px; color: var(--body); text-wrap: pretty; }
+.sugg-empty { background: var(--soft); border-radius: 16px; padding: 20px; color: var(--body); display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.aside-list { background: var(--soft); border-radius: 16px; padding: 8px 20px; display: flex; flex-direction: column; }
+.aside-row {
+  display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line);
+  font-size: 14px; min-width: 0; background: transparent; border-left: 0; border-right: 0; border-top: 0;
+  text-align: left; color: var(--ink); width: 100%;
+}
+.aside-row:last-child { border-bottom: 0; }
+button.aside-row { cursor: pointer; }
+button.aside-row:hover .l { text-decoration: underline; text-underline-offset: 2px; }
+.aside-row .c { font-variant-numeric: tabular-nums; flex: none; }
+.aside-row .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aside-row .m { color: var(--body); font-size: 13px; flex: none; font-variant-numeric: tabular-nums; }
+.aside-gap { padding: 12px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.aside-gap:last-child { border-bottom: 0; }
+.aside-gap .row1 { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.aside-gap .row1 .c { font-variant-numeric: tabular-nums; font-weight: 500; }
+.aside-gap .row1 .m { color: var(--body); font-size: 13px; }
+.aside-gap .row1 .acts { margin-left: auto; display: flex; gap: 6px; }
+.aside-gap .routines { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--body); }
+.tl-block.short .t { flex: none; }
+.aside-gap .row1 .c, .aside-gap .row1 .m { white-space: nowrap; }
+/* In dark the shadow disappears into the page; a hairline keeps the card's edge. */
+:root[data-theme="dark"] .tl-form { box-shadow: var(--shadow), 0 0 0 1px var(--line); }
+:root[data-theme="dark"] .booking-form .bf-hits { box-shadow: var(--shadow), 0 0 0 1px var(--line); }

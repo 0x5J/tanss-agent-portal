@@ -1,0 +1,57 @@
+/* Einstellungen: tab list on the left, the chosen section on the right. */
+.settings-layout { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+.settings-tabs { flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px; }
+.settings-tab {
+  text-align: left; background: transparent; border: 0; border-radius: 999px; padding: 10px 14px;
+  font-size: 14px; font-weight: 400; color: var(--ink); cursor: pointer; transition: background 150ms ease;
+}
+.settings-tab:hover { background: var(--soft); }
+.settings-tab.active { background: var(--soft2); font-weight: 500; }
+.settings-body { flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 32px; }
+
+/* Plain setting rows under an ink rule. */
+.settings-rows { display: flex; flex-direction: column; border-top: 2px solid var(--ink); }
+.settings-row { display: flex; align-items: center; gap: 16px; padding: 20px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.settings-row .label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-weight: 500; min-width: 200px; }
+.settings-row .label .meta { font-weight: 400; color: var(--body); font-size: 13px; }
+
+/* Status cards: one per connection, one for the update, one for the collector. */
+.status-card { background: var(--soft); border-radius: 16px; padding: 20px 24px; display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; }
+.status-card.big { padding: 24px; }
+.status-card .name { flex: 1 1 280px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.status-card .name strong { font-size: 18px; line-height: 24px; font-weight: 500; }
+.status-card .state { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.status-card .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.status-card .result { flex-basis: 100%; font-size: 13px; color: var(--body); text-wrap: pretty; }
+
+/* Forms on a soft card: white fields with a bottom rule. */
+.form-card { background: var(--soft); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.form-card .input, .form-card .textarea, .form-card .select { background: var(--bg); border-bottom: 2px solid var(--line); padding: 10px 12px; }
+.form-card .input:focus, .form-card .textarea:focus, .form-card .select:focus { border-bottom-color: var(--ink); }
+.form-card .input.invalid { border-bottom-color: var(--red); }
+.form-card .field > span:first-child, .form-card .field > label { font-size: 14px; font-weight: 500; color: var(--ink); }
+.form-help { font-size: 12px; line-height: 16px; color: var(--body); text-wrap: pretty; }
+.form-help.warn { color: var(--amber); }
+.form-help.danger { color: var(--red); }
+.form-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 20px; }
+.form-foot .result { font-size: 13px; color: var(--body); flex: 1 1 280px; text-wrap: pretty; }
+
+/* "Was der Agent tut": where | what. */
+.does-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.does-row .where { font-weight: 500; }
+.does-row .what { color: var(--body); text-wrap: pretty; }
+
+.routine-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.routine-row .input.text { flex: 1 1 220px; min-width: 160px; width: auto; }
+.routine-row .input.minutes { width: 64px; font-variant-numeric: tabular-nums; }
+.routine-row .unit { font-size: 13px; color: var(--body); }
+.round-x {
+  width: 36px; height: 36px; border-radius: 999px; border: 0; background: transparent; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; color: var(--ink); flex: none;
+}
+.round-x:hover { background: var(--soft2); color: var(--red); }
+.form-card .divider-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 900px) {
+  .settings-tabs { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; }
+}

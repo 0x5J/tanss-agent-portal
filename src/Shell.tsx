@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { UpdateIndicator } from "../shared/update.ts";
 import { SPARK } from "./ui/kit.tsx";
 
-export type View = "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
+export type View = "today" | "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
 
 type NavItem = { id: View; label: string; key: string; icon: string };
 
@@ -11,6 +11,7 @@ const NAV: { label: string; items: NavItem[] }[] = [
   {
     label: "Arbeit",
     items: [
+      { id: "today", label: "Heute", key: "G H", icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 16l2 2 4-4" },
       { id: "tickets", label: "Tickets", key: "G T", icon: "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" },
       { id: "times", label: "Zeiten", key: "G Z", icon: "M12 6v6l4 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0" },
       { id: "import", label: "Import", key: "G I", icon: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" },
@@ -64,6 +65,7 @@ const UPDATE_DOT: Record<UpdateIndicator["tone"], string> = {
 };
 
 const TITLES: Record<View, string> = {
+  today: "Heute",
   dashboard: "Dashboard",
   tickets: "Tickets",
   times: "Zeiten",
@@ -87,7 +89,6 @@ type Props = {
   /** The signed-in technician; empty until the TANSS metadata is in. */
   userName: string;
   employeeId: number;
-  subtitle: string;
   /** Small counters beside nav items (e.g. open tickets); zero or missing hides them. */
   counts?: Partial<Record<View, number>>;
   query: string;

@@ -1,56 +1,149 @@
+import type { ReactNode } from "react";
+import { KeyDot, Ring } from "./kit.tsx";
+
 const nf = new Intl.NumberFormat("de-DE");
 
-export const VIZ_SLOTS = ["var(--viz-1)", "var(--viz-2)", "var(--viz-3)", "var(--viz-4)", "var(--viz-5)", "var(--viz-6)"];
-
-export function StatTile(props: { label: string; value: string; hint?: string; tone?: "danger" | "warn" }) {
+/**
+ * Columns on an ink baseline (the redesign's bar chart). One series, one hue;
+ * only the peak carries its number, every bar carries its exact value on
+ * hover. Empty buckets keep their slot — a day without anything is often the
+ * thing you came to see.
+ */
+export function VBars(props: {
+  values: number[];
+  /** Hover text of a bar, e.g. "14 Uhr". */
+  labelOf: (index: number) => string;
+  /** Tick under a bar; empty string leaves the slot blank. */
+  tickOf: (index: number) => string;
+  format?: (value: number) => string;
+  /** Plot height in px. */
+  height?: number;
+  /** Widest a bar may get. */
+  maxBar?: number;
+  /** Bar width as share of its slot, e.g. "70%". */
+  barWidth?: string;
+  empty?: ReactNode;
+  /** Grey bars (weekends) instead of ink. */
+  dim?: (index: number) => boolean;
+  onPick?: (index: number) => void;
+  /** Extra hover suffix for clickable bars. */
+  pickHint?: string;
+  /** A dashed amber line at this value, labelled. */
+  target?: { value: number; label: string };
+  /** Scale floor, so a quiet range does not blow single minutes up to full height. */
+  minScale?: number;
+  ariaLabel?: string;
+}) {
+  const { values } = props;
+  const format = props.format ?? ((v: number) => nf.format(v));
+  const total = values.reduce((a, b) => a + b, 0);
+  if (values.length === 0 || (total === 0 && !props.target)) {
+    return <div className="empty-inline">{props.empty ?? "Keine Daten."}</div>;
+  }
+  const height = props.height ?? 180;
+  const peakValue = Math.max(...values);
+  const peak = values.indexOf(peakValue);
+  // Headroom above the tallest bar for its number (and above the target line).
+  const top = Math.max(props.minScale ?? 1, peakValue, props.target?.value ?? 0) * 1.08;
   return (
-    <div className="stat-tile">
-      <div className="tiny muted">{props.label}</div>
-      <div className="stat-value" style={props.tone ? { color: `var(--${props.tone})` } : undefined}>
-        {props.value}
+    <div className="vbars">
+      <div className="vbars-plot" style={{ height }} role="img" aria-label={props.ariaLabel}>
+        {props.target ? (
+          <div className="vbars-target" style={{ bottom: `${(props.target.value / top) * 100}%` }}>
+            <span>{props.target.label}</span>
+          </div>
+        ) : null}
+        {values.map((v, i) => {
+          const title = `${props.labelOf(i)} · ${format(v)}${props.onPick && props.pickHint ? ` · ${props.pickHint}` : ""}`;
+          const body = (
+            <>
+              <span className="v" style={{ visibility: i === peak && v > 0 ? "visible" : "hidden" }}>
+                {format(v)}
+              </span>
+              <span
+                className="b"
+                style={{
+                  height: `${(v / top) * 100}%`,
+                  minHeight: v > 0 ? 2 : 0,
+                  maxWidth: props.maxBar ?? 28,
+                  width: props.barWidth ?? "100%",
+                  background: props.dim?.(i) ? "var(--v5)" : undefined,
+                }}
+              />
+            </>
+          );
+          return props.onPick ? (
+            <button key={i} className="vbar" title={title} onClick={() => props.onPick?.(i)}>
+              {body}
+            </button>
+          ) : (
+            <div key={i} className="vbar" title={title}>
+              {body}
+            </div>
+          );
+        })}
       </div>
-      {props.hint ? <div className="tiny muted">{props.hint}</div> : null}
+      <div className="vbars-ticks">
+        {values.map((_, i) => (
+          <span key={i}>{props.tickOf(i)}</span>
+        ))}
+      </div>
     </div>
   );
 }
 
-export function HBars(props: {
-  rows: { id?: string; label: string; title?: string; count: number }[];
+export type RankRow = { id?: string; label: string; title?: string; value: number };
+
+/**
+ * Ranked rows with a thin ink bar under each label (Top-Kunden, Top-Tickets).
+ * A row is a click target only when it carries an `id` and the caller picks;
+ * the folded tail has no id and stays plain.
+ */
+export function RankRows(props: {
+  rows: RankRow[];
   format?: (value: number) => string;
-  empty?: string;
-  onPick?: (id: string) => void;
+  empty?: ReactNode;
   activeId?: string;
-  valueWidth?: number;
+  onPick?: (id: string) => void;
 }) {
-  const format = props.format ?? ((value: number) => nf.format(value));
-  const valueWidth = props.valueWidth ?? 32;
+  const format = props.format ?? ((v: number) => nf.format(v));
   if (props.rows.length === 0) {
-    return <div className="small muted" style={{ padding: "18px 0" }}>{props.empty ?? "Keine Tickets in dieser Liste."}</div>;
+    return (
+      <div className="table">
+        <div className="empty-inline">{props.empty ?? "Keine Daten."}</div>
+      </div>
+    );
   }
-  // All rows at zero would divide by zero and hand every bar a width of
-  // "NaN%". Bookings of zero minutes make that reachable, so the floor of 1
-  // keeps the arithmetic honest: every bar then draws at zero width.
-  const max = Math.max(1, ...props.rows.map((r) => r.count));
+  // All rows at zero would divide by zero; the floor keeps every bar at 0 %.
+  const max = Math.max(1, ...props.rows.map((r) => r.value));
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 2 }}>
+    <div className="table">
       {props.rows.map((r) => {
-        const pick = props.onPick && r.id ? () => props.onPick?.(r.id as string) : undefined;
-        return (
-          <div
-            key={r.id ?? r.label}
-            className="row"
-            style={{ gap: 8, cursor: pick ? "pointer" : undefined, opacity: props.activeId && props.activeId !== r.id ? 0.5 : 1 }}
-            onClick={pick}
+        const active = props.activeId !== undefined && props.activeId === r.id;
+        const inner = (
+          <>
+            <span className="line">
+              <span className="label">{r.label}</span>
+              <span className="val">{format(r.value)}</span>
+            </span>
+            <span className="track">
+              <span className="bar" style={{ width: `${(r.value / max) * 100}%` }} />
+            </span>
+          </>
+        );
+        const key = r.id ?? r.label;
+        return props.onPick && r.id ? (
+          <button
+            key={key}
+            className={`rank-row${active ? " active" : ""}`}
+            title={r.title ?? r.label}
+            onClick={() => props.onPick?.(r.id as string)}
           >
-            <span className="small ellipsis" style={{ flex: "none", width: 150 }} title={r.title ?? r.label}>
-              {r.label}
-            </span>
-            <span className="hbar-track">
-              <span className="hbar" style={{ width: `${(r.count / max) * 100}%` }} />
-            </span>
-            <span className="small mono muted" style={{ flex: "none", width: valueWidth, textAlign: "right" }}>
-              {format(r.count)}
-            </span>
+            {inner}
+          </button>
+        ) : (
+          <div key={key} className="rank-row" title={r.title ?? r.label}>
+            {inner}
           </div>
         );
       })}
@@ -59,90 +152,33 @@ export function HBars(props: {
 }
 
 /**
- * Part-to-whole at a glance, max six segments (the tail is already folded).
- * The legend carries every label and number — the donut is never the only
- * way to read a value.
- *
- * Picking works like it does in `HBars`: a segment is a click target only
- * when it carries an `id` and the caller wants picks. Callers that pass
- * neither render exactly as before — no cursor, no dimming, no handler.
+ * Part-to-whole on a soft card: the ring and a legend that carries every
+ * label and number — the ring is never the only way to read a value.
  */
-export function DonutCard(props: {
+export function RingCard(props: {
   title: string;
-  segments: { id?: string; label: string; count: number }[];
+  segments: { label: string; count: number }[];
   total: number;
-  format?: (value: number) => string;
   unit?: string;
   empty?: string;
-  centerFontSize?: number;
-  onPick?: (id: string) => void;
-  activeId?: string;
 }) {
-  const format = props.format ?? ((value: number) => nf.format(value));
-  const unit = props.unit ?? "Tickets";
-  const centerFontSize = props.centerFontSize ?? 26;
   const { segments, total } = props;
-  const r = 64;
-  const cx = 85;
-  const cy = 85;
-  const gapAngle = total > 0 ? Math.min(0.06, (2 * Math.PI * 0.02) / Math.max(segments.length, 1)) : 0;
-  let angle = -Math.PI / 2;
-  const arcs = segments.map((s, i) => {
-    const sweep = total > 0 ? (s.count / total) * 2 * Math.PI : 0;
-    const from = angle + gapAngle / 2;
-    const to = angle + sweep - gapAngle / 2;
-    angle += sweep;
-    return { ...s, from, to: Math.max(from, to), color: VIZ_SLOTS[i % VIZ_SLOTS.length] };
-  });
-  const { onPick, activeId } = props;
-  const pickOf = (id: string | undefined) => (onPick && id ? () => onPick(id) : undefined);
-  // Undefined, not 1: a caller without a facet must not even get the
-  // attribute, so its markup stays byte-for-byte what it was.
-  const dimOf = (id: string | undefined) => (activeId && activeId !== id ? 0.5 : undefined);
   return (
-    <div className="viz-card">
-      <div className="viz-title" style={{ marginBottom: 8 }}>{props.title}</div>
+    <div className="soft-card">
+      <span className="card-title">{props.title}</span>
       {total === 0 ? (
-        <div className="small muted" style={{ padding: "18px 0" }}>
-          {props.empty ?? "Keine Tickets in dieser Liste."}
-        </div>
+        <span className="muted small">{props.empty ?? "Keine Tickets in dieser Liste."}</span>
       ) : (
-        <div className="row" style={{ gap: 16, alignItems: "center" }}>
-          <svg width="170" height="170" viewBox="0 0 170 170" role="img" aria-label={props.title}>
-            {arcs.map((a) => (
-              <path
-                key={a.label}
-                d={arcPath(cx, cy, r, a.from, a.to)}
-                fill="none"
-                stroke={a.color}
-                strokeWidth="18"
-                strokeLinecap="butt"
-                opacity={dimOf(a.id)}
-                style={pickOf(a.id) ? { cursor: "pointer" } : undefined}
-                onClick={pickOf(a.id)}
-              >
-                <title>{`${a.label}: ${format(a.count)}`}</title>
-              </path>
-            ))}
-            <text x={cx} y={cy - 2} textAnchor="middle" fontSize={centerFontSize} fontWeight="600" fill="var(--text)">
-              {format(total)}
-            </text>
-            <text x={cx} y={cy + 17} textAnchor="middle" fontSize="11" fill="var(--text2)">
-              {unit}
-            </text>
-          </svg>
-          <div className="donut-legend">
-            {arcs.map((a) => (
-              <div
-                key={a.label}
-                className="row"
-                style={{ gap: 6, cursor: pickOf(a.id) ? "pointer" : undefined, opacity: dimOf(a.id) }}
-                onClick={pickOf(a.id)}
-              >
-                <span className="viz-key" style={{ background: a.color }} />
-                <span className="small ellipsis" style={{ minWidth: 0 }}>{a.label}</span>
-                <span className="small mono muted" style={{ marginLeft: "auto" }}>
-                  {format(a.count)} · {total ? Math.round((a.count / total) * 100) : 0}%
+        <div className="ring-wrap">
+          <Ring segments={segments.map((s) => ({ label: s.label, value: s.count }))} total={nf.format(total)} unit={props.unit ?? "Tickets"} />
+          <div className="ring-legend">
+            {segments.map((s, i) => (
+              <div key={s.label} className="ring-legend-row">
+                <KeyDot index={i} />
+                <span className="label">{s.label}</span>
+                <span className="val">
+                  {nf.format(s.count)}
+                  <span className="muted"> · {total ? Math.round((s.count / total) * 100) : 0} %</span>
                 </span>
               </div>
             ))}
@@ -151,19 +187,4 @@ export function DonutCard(props: {
       )}
     </div>
   );
-}
-
-export function arcPath(cx: number, cy: number, r: number, from: number, to: number): string {
-  const large = to - from > Math.PI ? 1 : 0;
-  const x0 = cx + r * Math.cos(from);
-  const y0 = cy + r * Math.sin(from);
-  const x1 = cx + r * Math.cos(to);
-  const y1 = cy + r * Math.sin(to);
-  // A full circle collapses to nothing as one arc — draw it as two halves.
-  if (to - from >= 2 * Math.PI - 0.001) {
-    const xm = cx + r * Math.cos(from + Math.PI);
-    const ym = cy + r * Math.sin(from + Math.PI);
-    return `M ${x0} ${y0} A ${r} ${r} 0 0 1 ${xm} ${ym} A ${r} ${r} 0 0 1 ${x0} ${y0}`;
-  }
-  return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
 }
