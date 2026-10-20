@@ -148,11 +148,13 @@ export function createWebhookWatcher(opts: {
     const current = statusOf(ticket.item, ticket.linked);
     // An empty answer (no status at all) is not a change to "status 0": unreadable for this pass.
     if (!(current.statusId > 0)) return;
-    const changed = links.filter((l) => l.lastStatusId !== current.statusId);
+    // A link with a stale status (switched on again while unreadable) only takes
+    // the current one below; what happened while it was off is not reported.
+    const changed = links.filter((l) => !l.rebaseline && l.lastStatusId !== current.statusId);
     /** "einmalig" links that have a call on its way (or already had one for this change): they end here. */
     const spent = new Set<string>();
     if (changed.length > 0) {
-      const windowStart = Math.min(...links.map((l) => l.checkedAt));
+      const windowStart = Math.min(...changed.map((l) => l.checkedAt));
       const history = await tanss.ticketHistory(session, ticketId);
       const linked = { ...history.linked, ...ticket.linked };
       const thread = buildThread(ticket.item, history.content, linked, current.customer);
@@ -215,16 +217,11 @@ export function createWebhookWatcher(opts: {
     // A "once" link ends when its call is queued, not when it succeeds: a second
     // change meanwhile must not queue a second call. A failed call stays in the
     // log and can be sent again from there.
-    updateLinks(employeeId, links, (l) =>
-      spent.has(l.webhookId)
-        ? null
-        : {
-            ...l,
-            lastStatusId: current.statusId,
-            lastStatusName: current.statusName,
-            checkedAt: at,
-          },
-    );
+    updateLinks(employeeId, links, (l) => {
+      if (spent.has(l.webhookId)) return null;
+      const { rebaseline: _taken, ...rest } = l;
+      return { ...rest, lastStatusId: current.statusId, lastStatusName: current.statusName, checkedAt: at };
+    });
     // Only the mark this pass could have used; one set while it ran is for the next change.
     const latest = portalMarks.get(markKey(employeeId, ticketId));
     if (changed.length > 0 && latest !== undefined && latest <= at) portalMarks.delete(markKey(employeeId, ticketId));

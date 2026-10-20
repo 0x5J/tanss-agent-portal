@@ -33,6 +33,12 @@ export type WebhookLink = {
   lastStatusName: string;
   /** Unix seconds of the last check. */
   checkedAt: number;
+  /**
+   * The stored status is stale (the webhook was switched on again but the
+   * ticket could not be read): the next check takes the current status as
+   * the baseline instead of reporting a change.
+   */
+  rebaseline?: true;
 };
 
 export type DeliveryState = "pending" | "ok" | "failed";
@@ -124,6 +130,7 @@ export function parseLinks(raw: unknown): WebhookLink[] {
       lastStatusId: num(r.lastStatusId),
       lastStatusName: str(r.lastStatusName, 200),
       checkedAt: num(r.checkedAt),
+      ...(r.rebaseline === true ? { rebaseline: true as const } : {}),
     });
   }
   return list;

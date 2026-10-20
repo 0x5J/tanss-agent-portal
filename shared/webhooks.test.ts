@@ -113,6 +113,15 @@ describe("parseLinks", () => {
     expect(list[1]).toEqual({ webhookId: "a", ticketId: 8, once: false, lastStatusId: 0, lastStatusName: "", checkedAt: 0 });
     expect(parseLinks({})).toEqual([]);
   });
+
+  it("keeps the rebaseline mark only when it is set", () => {
+    const [marked, plain] = parseLinks([
+      { webhookId: "a", ticketId: 7, rebaseline: true },
+      { webhookId: "a", ticketId: 8, rebaseline: "yes" },
+    ]);
+    expect(marked).toMatchObject({ rebaseline: true });
+    expect(plain).not.toHaveProperty("rebaseline");
+  });
 });
 
 describe("parseDeliveries", () => {

@@ -353,8 +353,8 @@ describe("webhook routes", () => {
     expect(store.webhookDeliveries(7)).toHaveLength(1);
   });
 
-  it("leaves a link alone when its baseline cannot be fetched", async () => {
-    const { login, call, state, store } = await setup();
+  it("lets the next check take the baseline when it cannot be fetched on reactivation", async () => {
+    const { login, call, state, store, watcher, sent } = await setup();
     const cookie = await login(7);
     const id = (await call(cookie, "POST", "/me/webhooks", { name: "Teams", url: "https://hook.example/a" })).json().webhook.id as string;
     await call(cookie, "POST", "/me/tickets/42/webhooks", { webhookId: id, once: false });
@@ -362,11 +362,26 @@ describe("webhook routes", () => {
     const put = (active: boolean) =>
       call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", active });
     await put(false);
+    state.statusId = 3; // changes while the webhook is off
     state.failTicket = true;
     const res = await put(true);
     expect(res.statusCode).toBe(200);
     expect(res.json().webhook.active).toBe(true);
-    expect(store.webhookLinks(7)[0]).toEqual(link);
+    expect(store.webhookLinks(7)[0]).toEqual({ ...link, rebaseline: true });
+
+    // TANSS answers again: the first check only takes the current status, it sends nothing
+    state.failTicket = false;
+    await watcher.check();
+    await watcher.flush();
+    expect(store.webhookDeliveries(7)).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(store.webhookLinks(7)[0]).toMatchObject({ lastStatusId: 3, lastStatusName: "Erledigt" });
+    expect(store.webhookLinks(7)[0]).not.toHaveProperty("rebaseline");
+
+    // a change after that is caught as usual
+    state.statusId = 4;
+    await watcher.check();
+    expect(store.webhookDeliveries(7)).toHaveLength(1);
   });
 
   it("passes a 401 during reactivation on and saves nothing", async () => {

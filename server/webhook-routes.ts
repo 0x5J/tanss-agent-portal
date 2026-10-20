@@ -127,7 +127,8 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
     // A webhook that was off missed changes on purpose; switching it on starts
     // from where the tickets are now, so it does not fire for the time away.
     const baselines = new Map<number, { statusId: number; statusName: string; at: number }>();
-    if (!existing.active && next.active) {
+    const reactivated = !existing.active && next.active;
+    if (reactivated) {
       const tickets = store.webhookLinks(employeeId).filter((l) => l.webhookId === id).map((l) => l.ticketId);
       if (tickets.length > 0) {
         await withSession(request, reply, async (session) => {
@@ -139,7 +140,8 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
             } catch (error) {
               // A dead session is for withSession to heal (or to report); nothing is saved then.
               if (error instanceof TanssError && error.status === 401) throw error;
-              // Any other failure: this link stays as it was.
+              // Any other failure: the link is marked, and the next check that
+              // can read the ticket takes its status as the baseline.
             }
           }
         });
@@ -150,12 +152,15 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       employeeId,
       store.webhooks(employeeId).map((w) => (w.id === id ? next : w)),
     );
-    if (baselines.size > 0) {
+    if (reactivated) {
       store.setWebhookLinks(
         employeeId,
         store.webhookLinks(employeeId).map((l) => {
-          const base = l.webhookId === id ? baselines.get(l.ticketId) : undefined;
-          return base ? { ...l, lastStatusId: base.statusId, lastStatusName: base.statusName, checkedAt: base.at } : l;
+          if (l.webhookId !== id) return l;
+          const base = baselines.get(l.ticketId);
+          if (!base) return { ...l, rebaseline: true };
+          const { rebaseline: _stale, ...rest } = l;
+          return { ...rest, lastStatusId: base.statusId, lastStatusName: base.statusName, checkedAt: base.at };
         }),
       );
     }

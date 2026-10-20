@@ -182,7 +182,9 @@ Anlass im Verlauf gefunden“.
   gefüllte Vorlage muss gültiges JSON sein, sonst wird beim Speichern bzw.
   Test ein Fehler gezeigt.
 - **Reaktivieren** eines Webhooks liest den aktuellen Status seiner Tickets
-  neu als Ausgangsstand ein, damit nichts Altes nachfeuert.
+  neu als Ausgangsstand ein, damit nichts Altes nachfeuert. Lässt sich ein
+  Ticket dabei nicht lesen, wird die Verknüpfung markiert; die nächste Prüfung,
+  die das Ticket lesen kann, übernimmt dann still den aktuellen Status.
 
 ## Dem Bauenden überlassen
 
