@@ -36,6 +36,8 @@ export type WebhookWatcher = {
 };
 
 export const FLUSH_INTERVAL_MS = 15_000;
+/** A portal mark older than this can no longer explain a change; it is dropped. */
+const MARK_MAX_AGE_S = 2 * SAMPLE_INTERVAL_MINUTES * 60;
 
 const GONE = "Ticket nicht mehr abrufbar – Verknüpfung entfernt";
 const DELETED = "Webhook gelöscht";
@@ -206,13 +208,17 @@ export function createWebhookWatcher(opts: {
       lastStatusName: current.statusName,
       checkedAt: at,
     }));
-    if (changed.length > 0) portalMarks.delete(markKey(employeeId, ticketId));
+    // Only the mark this pass could have used; one set while it ran is for the next change.
+    const latest = portalMarks.get(markKey(employeeId, ticketId));
+    if (changed.length > 0 && latest !== undefined && latest <= at) portalMarks.delete(markKey(employeeId, ticketId));
   }
 
   async function check(): Promise<void> {
     if (checking) return;
     checking = true;
     try {
+      const oldest = seconds() - MARK_MAX_AGE_S;
+      for (const [key, at] of portalMarks) if (at < oldest) portalMarks.delete(key);
       const state = shared.state(seconds());
       if (!state.present) return;
       const employeeId = state.employeeId;
@@ -269,9 +275,15 @@ export function createWebhookWatcher(opts: {
           if (!d || d.state !== "pending") continue;
           const w = store.webhooks(employeeId).find((x) => x.id === d.webhookId);
           const at = seconds();
-          // The secret is looked up now, never copied into the log.
+          // URL and secret are the webhook's current ones: a moved receiver
+          // must not get retries at its old address, signed with the new secret.
+          // The delivery records where the attempt actually went.
           const next: Delivery = w
-            ? afterAttempt(d, await send(fetcher, { url: d.url, body: d.body, deliveryId: d.id, secret: w.secret, nowUnix: at }), at)
+            ? afterAttempt(
+                { ...d, url: w.url },
+                await send(fetcher, { url: w.url, body: d.body, deliveryId: d.id, secret: w.secret, nowUnix: at }),
+                at,
+              )
             : { ...d, state: "failed", result: DELETED, finishedAt: at };
           store.setWebhookDeliveries(
             employeeId,
@@ -338,8 +350,11 @@ export function createWebhookWatcher(opts: {
       // Without a body there is nothing to send again (a removed link, a broken template).
       if (!original || !original.body) return null;
       const at = seconds();
+      const current = store.webhooks(employeeId).find((w) => w.id === original.webhookId);
       const copy: Delivery = {
         ...original,
+        // flush sends to the current URL anyway; the log should say so from the start.
+        url: current?.url ?? original.url,
         id: newId(),
         createdAt: at,
         attempts: 0,

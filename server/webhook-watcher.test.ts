@@ -99,6 +99,7 @@ function setup(opts: {
   employeeId?: number;
   statuses?: number[];
   store?: Store;
+  ticketUrl?: string;
 } = {}) {
   const store = opts.store ?? createMemoryStore();
   store.setSession({ employeeId: 7, apiKey: "a", refresh: "r", expire: 0, updatedAt: 0 });
@@ -111,7 +112,7 @@ function setup(opts: {
     tanss: client,
     store,
     shared: fakeShared(opts.employeeId ?? 7),
-    ticketUrl: TICKET_URL,
+    ticketUrl: opts.ticketUrl ?? TICKET_URL,
     fetcher,
     now: () => clock.now * 1000,
   });
@@ -222,11 +223,23 @@ describe("webhook watcher", () => {
   });
 
   it("a foreign session pauses the check", async () => {
-    const { store, watcher, calls } = setup({ employeeId: 8 });
+    const store = createMemoryStore();
+    store.setWebhooks(8, [hook()]);
+    store.setWebhookLinks(8, [link()]);
+    // state() says 8, but the session run hands out belongs to 7.
+    const { watcher, calls } = setup({ employeeId: 8, store });
     await watcher.check();
     expect(calls).toEqual([]);
     expect(deliveries(store)).toEqual([]);
+    expect(store.webhookDeliveries(8)).toEqual([]);
     expect(store.webhookLinks(7)[0]).toEqual(link());
+    expect(store.webhookLinks(8)[0]).toEqual(link());
+  });
+
+  it("without a ticket URL the payload carries an empty one", async () => {
+    const { store, watcher } = setup({ ticketUrl: "" });
+    await watcher.check();
+    expect((JSON.parse(deliveries(store)[0].body) as WebhookPayload).ticket.url).toBe("");
   });
 
   it("404 removes the link and logs it", async () => {
@@ -274,6 +287,41 @@ describe("webhook watcher", () => {
     expect(payload.cause.by).toBe("Erika Technik");
   });
 
+  it("a portal mark set during the pass survives for the next change", async () => {
+    let status = 3;
+    let watcherRef: { notePortalChange(e: number, t: number, a: number): void } | null = null;
+    const { store, watcher, clock } = setup({
+      tanss: {
+        ticketById: async (_s: TanssSession, id: number) => ({
+          item: { id, title: "T", statusId: status, companyId: 5 },
+          linked: { ticketStates: { "2": { name: "Neu" }, "3": { name: "Erledigt" }, "4": { name: "Wartet" } } },
+        }),
+        ticketHistory: async () => {
+          watcherRef?.notePortalChange(7, 42, START + 1);
+          return { content: { comments: [], supports: [], mails: [] }, linked: {} };
+        },
+      } as Partial<TanssClient>,
+    });
+    watcherRef = watcher;
+    await watcher.check();
+    expect((JSON.parse(deliveries(store)[0].body) as WebhookPayload).cause.kind).toBe("unknown");
+    watcherRef = null;
+    status = 4;
+    clock.now += 300;
+    await watcher.check();
+    const second = JSON.parse(deliveries(store)[1].body) as WebhookPayload;
+    expect(second.cause).toMatchObject({ kind: "portal", derived: false });
+    expect(second.cause.at).toBe(new Date((START + 1) * 1000).toISOString());
+  });
+
+  it("old portal marks are pruned", async () => {
+    // The window reaches back far enough, but a mark older than two intervals is dropped.
+    const { store, watcher } = setup({ links: [link({ checkedAt: START - 2000 })] });
+    watcher.notePortalChange(7, 42, START - 1000);
+    await watcher.check();
+    expect((JSON.parse(deliveries(store)[0].body) as WebhookPayload).cause.kind).toBe("mail");
+  });
+
   it("a portal mark outside the window is ignored", async () => {
     const { store, watcher } = setup();
     watcher.notePortalChange(7, 42, START - 1000);
@@ -318,6 +366,24 @@ describe("webhook watcher", () => {
     expect(header(seen[1].init, "X-Portal-Delivery")).toBe(header(seen[0].init, "X-Portal-Delivery"));
     expect(deliveries(store)[0]).toMatchObject({ state: "ok", attempts: 2, result: "204" });
     expect(store.webhookLinks(7)).toEqual([]);
+  });
+
+  it("a changed webhook URL takes effect for pending deliveries", async () => {
+    const { store, watcher, seen } = setup();
+    await watcher.check();
+    store.setWebhooks(7, [hook({ url: "http://neu.local/b" })]);
+    await watcher.flush();
+    expect(seen.map((s) => s.url)).toEqual(["http://neu.local/b"]);
+    expect(deliveries(store)[0]).toMatchObject({ state: "ok", url: "http://neu.local/b" });
+  });
+
+  it("resend targets the current webhook URL", async () => {
+    const { store, watcher } = setup();
+    await watcher.check();
+    await watcher.flush();
+    store.setWebhooks(7, [hook({ url: "http://neu.local/b" })]);
+    const copy = watcher.resend(7, deliveries(store)[0].id);
+    expect(copy?.url).toBe("http://neu.local/b");
   });
 
   it("a deleted webhook finishes its open deliveries", async () => {
