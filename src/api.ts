@@ -8,7 +8,7 @@ import type { StyleSettings } from "../shared/style.ts";
 import type { ImportRules, Suggestion, WorkflowState } from "../shared/import.ts";
 import type { Target } from "../shared/mapping.ts";
 import type { UpdateOverview } from "../shared/update.ts";
-import type { Delivery, ListedWebhook, WebhookLink } from "../shared/webhooks.ts";
+import type { Delivery, ListedWebhook, WebhookAuth, WebhookLink } from "../shared/webhooks.ts";
 
 export type ImportBookItem = {
   issue: string;
@@ -110,6 +110,8 @@ export type WebhookInput = {
   url: string;
   statusFilter?: number[];
   template?: string;
+  auth?: WebhookAuth;
+  headerName?: string;
   secret?: string;
   /** Only the list's switch sends this; the form leaves it out. */
   active?: boolean;

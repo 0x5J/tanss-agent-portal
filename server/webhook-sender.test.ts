@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Delivery } from "../shared/webhooks.ts";
-import { afterAttempt, send, signature, type Fetcher } from "./webhook-sender.ts";
+import { afterAttempt, send, signature, type Fetcher, type WebhookCall } from "./webhook-sender.ts";
 
 function delivery(partial: Partial<Delivery> = {}): Delivery {
   return {
@@ -79,7 +79,7 @@ describe("webhook sender", () => {
       seen.push(init);
       return new Response(null, { status: 301, headers: { location: "http://elsewhere" } });
     }) as unknown as Fetcher;
-    expect(await send(fetcher, base)).toEqual({ ok: false, status: 301, error: "HTTP 301" });
+    expect(await send(fetcher, base)).toEqual({ ok: false, status: 301, error: "HTTP 301: Weiterleitung nach http://elsewhere" });
     expect(seen[0].redirect).toBe("manual");
   });
 
@@ -96,7 +96,11 @@ describe("webhook sender", () => {
 
   it("releases the response body", async () => {
     let cancelled = false;
-    const body = new ReadableStream({ cancel: () => { cancelled = true; } });
+    // An answer that is longer than we keep and never ends.
+    const body = new ReadableStream({
+      start: (c) => c.enqueue(new TextEncoder().encode("x".repeat(3000))),
+      cancel: () => { cancelled = true; },
+    });
     const fetcher = (async () => new Response(body, { status: 200 })) as unknown as Fetcher;
     expect((await send(fetcher, base)).ok).toBe(true);
     expect(cancelled).toBe(true);
@@ -126,5 +130,67 @@ describe("webhook sender", () => {
   it("success finishes with the status code as result", () => {
     const d = afterAttempt(delivery({ attempts: 1 }), { ok: true, status: 204, error: "" }, 2000);
     expect(d).toMatchObject({ state: "ok", attempts: 2, result: "204", finishedAt: 2000 });
+  });
+});
+
+describe("webhook auth and log", () => {
+  const TOKEN = "tok_abcdefghijklmnopqrstuvwxyz0123456789";
+  function capture(status = 204, answer: string | null = null) {
+    const seen: Headers[] = [];
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      seen.push(new Headers(init.headers));
+      return new Response(answer, { status });
+    }) as unknown as Fetcher;
+    return { seen, fetcher };
+  }
+
+  it("sends the secret as a bearer token instead of a signature", async () => {
+    const { seen, fetcher } = capture();
+    await send(fetcher, { ...base, secret: TOKEN, auth: "bearer" });
+    expect(seen[0].get("authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(seen[0].get("x-portal-signature")).toBeNull();
+  });
+
+  it("sends the secret in a header the receiver names", async () => {
+    const { seen, fetcher } = capture();
+    await send(fetcher, { ...base, secret: TOKEN, auth: "header", headerName: "X-Api-Key" });
+    expect(seen[0].get("x-api-key")).toBe(TOKEN);
+    expect(seen[0].get("authorization")).toBeNull();
+  });
+
+  it("quotes the receiver's answer in the error", async () => {
+    const { fetcher } = capture(401, '{"error":"invalid\n  api key"}');
+    expect(await send(fetcher, base)).toEqual({ ok: false, status: 401, error: 'HTTP 401: {"error":"invalid api key"}' });
+  });
+
+  it("reports every call with masked headers, body and answer", async () => {
+    const calls: WebhookCall[] = [];
+    const { fetcher } = capture(401, "Authorization data is wrong!");
+    await send(fetcher, { ...base, body: '{"a":1}', secret: TOKEN, auth: "bearer", onCall: (c) => calls.push(c) });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      url: "http://h",
+      body: '{"a":1}',
+      ok: false,
+      status: 401,
+      response: "Authorization data is wrong!",
+      error: "HTTP 401: Authorization data is wrong!",
+    });
+    expect(calls[0].headers).toMatchObject({
+      Authorization: "Bearer tok_…89 (40 Zeichen)",
+      "X-Portal-Delivery": "d1",
+      "X-Portal-Timestamp": "1700000000",
+    });
+    expect(JSON.stringify(calls[0])).not.toContain(TOKEN);
+  });
+
+  it("reports a failed connection too", async () => {
+    const calls: WebhookCall[] = [];
+    const fetcher = (async () => {
+      throw new TypeError("fetch failed", { cause: { code: "ECONNREFUSED" } });
+    }) as unknown as Fetcher;
+    await send(fetcher, { ...base, onCall: (c) => calls.push(c) });
+    expect(calls[0]).toMatchObject({ ok: false, status: 0, error: "fetch failed (ECONNREFUSED)", response: "" });
+    expect(calls[0].headers["X-Portal-Signature"]).toBe(signature("k", 1700000000, "{}"));
   });
 });

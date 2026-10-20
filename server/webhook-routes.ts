@@ -6,9 +6,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
+  AUTH_MODES,
   DEFAULT_TEMPLATE,
+  MAX_SECRET_LENGTH,
   MAX_TEMPLATE_LENGTH,
   MAX_WEBHOOKS,
+  isHeaderName,
   isHttpUrl,
   newId,
   templateError,
@@ -35,7 +38,10 @@ const webhookSchema = z.object({
   url: z.string().trim().max(2000).refine(isHttpUrl),
   statusFilter: z.array(z.number().int().positive()).max(50).optional(),
   template: z.string().max(MAX_TEMPLATE_LENGTH).optional(),
-  secret: z.string().max(200).optional(),
+  auth: z.enum(AUTH_MODES as [string, ...string[]]).optional(),
+  headerName: z.string().trim().max(64).optional(),
+  // Pasted tokens often bring a line break or a space along; they are never part of it.
+  secret: z.string().trim().max(MAX_SECRET_LENGTH).optional(),
   active: z.boolean().optional(),
 });
 
@@ -45,6 +51,17 @@ const attachSchema = z.object({
 });
 
 const NOT_FOUND = "Webhook nicht gefunden";
+const HEADER_INVALID = "Header-Name ungültig: nur Buchstaben, Ziffern und Bindestriche, nicht Content-Type oder X-Portal-…";
+
+/** Auth mode and header name from a request, falling back to what is stored. The name only counts for "header". */
+function authOf(
+  data: { auth?: string; headerName?: string },
+  fallback: Pick<Webhook, "auth" | "headerName">,
+): Pick<Webhook, "auth" | "headerName"> {
+  const auth = (data.auth ?? fallback.auth) as Webhook["auth"];
+  const headerName = data.headerName ?? fallback.headerName;
+  return { auth, headerName: auth === "header" ? headerName : "" };
+}
 const NO_DELIVERY = "Zustellung nicht gefunden";
 
 const withoutBody = ({ body: _body, ...rest }: Delivery) => rest;
@@ -97,9 +114,13 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       trigger: "status",
       statusFilter: [...new Set(data.statusFilter ?? [])],
       template: data.template ?? DEFAULT_TEMPLATE,
+      ...authOf(data, { auth: "signature", headerName: "" }),
       secret: data.secret ?? "",
       active: data.active ?? true,
     };
+    if (webhook.auth === "header" && !isHeaderName(webhook.headerName)) {
+      return reply.code(400).send({ error: HEADER_INVALID });
+    }
     store.setWebhooks(employeeId, [...list, webhook]);
     return { webhook: listed(employeeId, webhook) };
   });
@@ -121,8 +142,12 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
       template: data.template ?? existing.template,
       // Missing keeps the stored secret, an empty string removes it.
       secret: data.secret === undefined ? existing.secret : data.secret,
+      ...authOf(data, existing),
       active: data.active ?? existing.active,
     };
+    if (next.auth === "header" && !isHeaderName(next.headerName)) {
+      return reply.code(400).send({ error: HEADER_INVALID });
+    }
 
     // A webhook that was off missed changes on purpose; switching it on starts
     // from where the tickets are now, so it does not fire for the time away.

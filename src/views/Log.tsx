@@ -11,6 +11,8 @@ type Props = {
 };
 
 /** Every API request and TANSS call of this server, newest first, kept in memory only. */
+const SOURCE: Record<LogEntry["kind"], string> = { request: "Portal", tanss: "TANSS", webhook: "Webhook" };
+
 export function LogView({ onSubtitle, onError }: Props) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState<"all" | "errors">("all");
@@ -77,6 +79,7 @@ export function LogView({ onSubtitle, onError }: Props) {
       <div className="tiles">
         <Tile label="Anfragen an das Portal" value={entries.filter((e) => e.kind === "request").length} />
         <Tile label="Aufrufe bei TANSS" value={entries.filter((e) => e.kind === "tanss").length} />
+        <Tile label="Webhook-Aufrufe" value={entries.filter((e) => e.kind === "webhook").length} />
         <Tile label="Fehlgeschlagen" value={failed} tone={failed ? "danger" : undefined} />
       </div>
 
@@ -106,7 +109,7 @@ export function LogView({ onSubtitle, onError }: Props) {
                 >
                   <span className="num-cell muted">{dayAndClock(Math.floor(entry.at / 1000))}</span>
                   <span>
-                    <span className="badge">{entry.kind === "request" ? "Portal" : "TANSS"}</span>
+                    <span className="badge">{SOURCE[entry.kind]}</span>
                   </span>
                   <span className="ellipsis" style={{ paddingRight: 16 }}>
                     <span style={{ fontWeight: 500 }}>{entry.method}</span> {entry.path}
@@ -129,6 +132,7 @@ export function LogView({ onSubtitle, onError }: Props) {
                   <div className="log-detail">
                     {entry.redirected ? `umgeleitet nach ${entry.url}\n` : ""}
                     {entry.traceId ? `traceId ${entry.traceId}\n` : ""}
+                    {entry.headers ? `Header:\n${entry.headers}\n\n` : ""}
                     {entry.body ? `Nutzlast: ${entry.body}\n` : ""}
                     {entry.response ? `Antwort: ${entry.response}` : ""}
                     {!entry.body && !entry.response && !entry.redirected && !entry.traceId ? "(keine Details)" : ""}

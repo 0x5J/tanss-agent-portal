@@ -1,4 +1,4 @@
-export type LogKind = "request" | "tanss";
+export type LogKind = "request" | "tanss" | "webhook";
 
 export type LogEntry = {
   /** Monotonically increasing, so the client can poll for what is new. */
@@ -22,6 +22,8 @@ export type LogEntry = {
   response: string;
   /** TANSS-side correlation id of a rejection, worth quoting towards TANSS. */
   traceId: string;
+  /** Request headers as sent, one per line; only for webhook calls, secrets shown as hints. */
+  headers?: string;
 };
 
 export const LOG_LIMIT = 300;

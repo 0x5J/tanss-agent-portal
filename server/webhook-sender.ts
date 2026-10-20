@@ -1,8 +1,28 @@
 import { createHmac } from "node:crypto";
-import type { Delivery } from "../shared/webhooks.ts";
+import { secretHint, type Delivery, type WebhookAuth } from "../shared/webhooks.ts";
 
 export type Fetcher = typeof fetch;
 export type SendResult = { ok: boolean; status: number; error: string };
+
+/**
+ * One call as it went out and came back — for the log. The secret is never
+ * in it: a bearer token or auth header shows only its hint.
+ */
+export type WebhookCall = {
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+  ok: boolean;
+  status: number;
+  durationMs: number;
+  /** What the receiver answered, cut to a readable length. */
+  response: string;
+  error: string;
+};
+
+/** Longest answer kept for the log; the error line quotes less. */
+const MAX_RESPONSE = 2000;
+const MAX_QUOTE = 200;
 
 export const SEND_TIMEOUT_MS = 10_000;
 /** Waits before the second and third attempt. */
@@ -24,35 +44,128 @@ function errorText(e: unknown): string {
   return e.message;
 }
 
-/** One call to the target. Never throws: every failure becomes a result. */
-export async function send(
-  fetcher: Fetcher,
-  opts: { url: string; body: string; deliveryId: string; secret: string; nowUnix: number; timeoutMs?: number },
-): Promise<SendResult> {
-  const headers: Record<string, string> = {
+/**
+ * The headers of one call: ours, plus how the receiver recognises the portal.
+ * `shown` is the same set for the log, with the secret replaced by its hint.
+ */
+export function callHeaders(opts: {
+  body: string;
+  deliveryId: string;
+  secret: string;
+  nowUnix: number;
+  auth: WebhookAuth;
+  headerName: string;
+}): { sent: Record<string, string>; shown: Record<string, string> } {
+  const sent: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Portal-Delivery": opts.deliveryId,
     "X-Portal-Timestamp": String(opts.nowUnix),
   };
-  if (opts.secret) headers["X-Portal-Signature"] = signature(opts.secret, opts.nowUnix, opts.body);
+  const shown = { ...sent };
+  if (!opts.secret) return { sent, shown };
+  if (opts.auth === "bearer") {
+    sent.Authorization = `Bearer ${opts.secret}`;
+    shown.Authorization = `Bearer ${secretHint(opts.secret)}`;
+  } else if (opts.auth === "header" && opts.headerName) {
+    sent[opts.headerName] = opts.secret;
+    shown[opts.headerName] = secretHint(opts.secret);
+  } else {
+    // The signature is derived, not the secret; it may be shown as is.
+    sent["X-Portal-Signature"] = signature(opts.secret, opts.nowUnix, opts.body);
+    shown["X-Portal-Signature"] = sent["X-Portal-Signature"];
+  }
+  return { sent, shown };
+}
+
+/** A receiver that keeps the answer open must not hold the queue. */
+const READ_DEADLINE_MS = 2_000;
+
+/**
+ * Up to `limit` characters of the answer, then the rest is dropped and the
+ * connection released — also when the receiver stops sending halfway.
+ */
+async function readBounded(res: Response, limit: number, deadlineMs: number): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<"late">((resolve) => {
+    timer = setTimeout(() => resolve("late"), deadlineMs);
+  });
+  try {
+    while (text.length < limit) {
+      const next = await Promise.race([reader.read(), deadline]);
+      if (next === "late" || next.done) break;
+      text += decoder.decode(next.value, { stream: true });
+    }
+  } catch {
+    // A broken answer is no answer.
+  } finally {
+    clearTimeout(timer);
+    void reader.cancel().catch(() => {});
+  }
+  return text.slice(0, limit);
+}
+
+/** The answer on one line, short enough for an error message. */
+function quote(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > MAX_QUOTE ? `${line.slice(0, MAX_QUOTE)}…` : line;
+}
+
+/** One call to the target. Never throws: every failure becomes a result. */
+export async function send(
+  fetcher: Fetcher,
+  opts: {
+    url: string;
+    body: string;
+    deliveryId: string;
+    secret: string;
+    nowUnix: number;
+    timeoutMs?: number;
+    auth?: WebhookAuth;
+    headerName?: string;
+    /** Sees every call with what was sent and answered — the portal's log. */
+    onCall?: (call: WebhookCall) => void;
+  },
+): Promise<SendResult> {
+  const { sent, shown } = callHeaders({ ...opts, auth: opts.auth ?? "signature", headerName: opts.headerName ?? "" });
+  const started = Date.now();
+  const finish = (result: SendResult, response = ""): SendResult => {
+    opts.onCall?.({
+      url: opts.url,
+      headers: shown,
+      body: opts.body,
+      ok: result.ok,
+      status: result.status,
+      durationMs: Date.now() - started,
+      response,
+      error: result.error,
+    });
+    return result;
+  };
   try {
     const res = await fetcher(opts.url, {
       method: "POST",
-      headers,
+      headers: sent,
       body: opts.body,
       // A redirect would turn the call into a body-less GET; treat it as a failure.
       redirect: "manual",
       signal: AbortSignal.timeout(opts.timeoutMs ?? SEND_TIMEOUT_MS),
     });
-    void res.body?.cancel().catch(() => {});
-    if (res.ok) return { ok: true, status: res.status, error: "" };
-    return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+    // The answer is the evidence when something is refused; read a bounded part of it.
+    const response = await readBounded(res, MAX_RESPONSE, READ_DEADLINE_MS);
+    if (res.ok) return finish({ ok: true, status: res.status, error: "" }, response);
+    const location = res.headers.get("location");
+    const detail = location ? `Weiterleitung nach ${location}` : quote(response);
+    return finish({ ok: false, status: res.status, error: `HTTP ${res.status}${detail ? `: ${detail}` : ""}` }, response);
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
     if (name === "TimeoutError" || name === "AbortError") {
-      return { ok: false, status: 0, error: "Zeitlimit überschritten" };
+      return finish({ ok: false, status: 0, error: "Zeitlimit überschritten" });
     }
-    return { ok: false, status: 0, error: errorText(e) };
+    return finish({ ok: false, status: 0, error: errorText(e) });
   }
 }
 

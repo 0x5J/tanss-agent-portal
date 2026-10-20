@@ -14,12 +14,24 @@ export type Webhook = {
   /** Status ids that fire the webhook; empty means every change. */
   statusFilter: number[];
   template: string;
+  /** How the receiver recognises the portal; `secret` is the value for every mode. */
+  auth: WebhookAuth;
+  /** Header that carries the secret, only for auth "header". */
+  headerName: string;
   secret: string;
   active: boolean;
 };
 
-/** What goes to the client: the secret stays on the server. */
-export type PublicWebhook = Omit<Webhook, "secret"> & { hasSecret: boolean };
+/**
+ * "signature": X-Portal-Signature, an HMAC over timestamp and body.
+ * "bearer": Authorization: Bearer <secret>, as many APIs expect.
+ * "header": the secret as the value of a header the receiver names.
+ */
+export type WebhookAuth = "signature" | "bearer" | "header";
+export const AUTH_MODES: readonly WebhookAuth[] = ["signature", "bearer", "header"];
+
+/** What goes to the client: the secret stays on the server, a hint shows it arrived whole. */
+export type PublicWebhook = Omit<Webhook, "secret"> & { hasSecret: boolean; secretHint: string };
 
 /** What the list shows: the public webhook plus how many tickets it hangs on. */
 export type ListedWebhook = PublicWebhook & { linkCount: number };
@@ -110,11 +122,20 @@ export function parseWebhooks(raw: unknown): Webhook[] {
       trigger: "status",
       statusFilter: [...new Set(filter)],
       template: typeof r.template === "string" && r.template.trim() ? r.template.slice(0, MAX_TEMPLATE_LENGTH) : DEFAULT_TEMPLATE,
-      secret: str(r.secret, 200),
+      ...authOf(r),
+      secret: str(r.secret, MAX_SECRET_LENGTH),
       active: r.active !== false,
     });
   }
   return list;
+}
+
+/** Older files have no auth field: they signed, so they keep signing. A header mode without a usable name does too. */
+function authOf(r: Record<string, unknown>): { auth: WebhookAuth; headerName: string } {
+  const headerName = typeof r.headerName === "string" && isHeaderName(r.headerName) ? r.headerName : "";
+  const auth = AUTH_MODES.includes(r.auth as WebhookAuth) ? (r.auth as WebhookAuth) : "signature";
+  if (auth === "header" && !headerName) return { auth: "signature", headerName: "" };
+  return { auth, headerName: auth === "header" ? headerName : "" };
 }
 
 export function parseLinks(raw: unknown): WebhookLink[] {
@@ -169,7 +190,36 @@ export function parseDeliveries(raw: unknown): Delivery[] {
 
 export function toPublic(w: Webhook): PublicWebhook {
   const { secret, ...rest } = w;
-  return { ...rest, hasSecret: secret !== "" };
+  return { ...rest, hasSecret: secret !== "", secretHint: secretHint(secret) };
+}
+
+export const MAX_SECRET_LENGTH = 2000;
+
+/**
+ * Enough of a secret to tell whether it arrived whole — start, end, length —
+ * without being usable. Short ones show only their length.
+ */
+export function secretHint(secret: string): string {
+  if (!secret) return "";
+  const length = `${secret.length} Zeichen`;
+  return secret.length < 10 ? `(${length})` : `${secret.slice(0, 4)}…${secret.slice(-2)} (${length})`;
+}
+
+/** Headers the portal sets itself or that HTTP owns; a custom auth header may not replace them. */
+const RESERVED_HEADERS = new Set([
+  "content-type",
+  "content-length",
+  "host",
+  "connection",
+  "transfer-encoding",
+  "x-portal-delivery",
+  "x-portal-timestamp",
+  "x-portal-signature",
+]);
+
+/** A header name the receiver can be given: an HTTP token, not one of ours. */
+export function isHeaderName(name: string): boolean {
+  return /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(name) && !RESERVED_HEADERS.has(name.toLowerCase());
 }
 
 export function matchesFilter(w: Webhook, newStatusId: number): boolean {

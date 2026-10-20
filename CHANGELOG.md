@@ -6,6 +6,26 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Webhooks: Anmeldung beim Empfänger wählbar — Signatur (wie bisher),
+  Bearer-Token (`Authorization: Bearer …`) oder ein eigener Header wie
+  `X-Api-Key`. Vom gespeicherten Wert zeigt das Portal Anfang, Ende und Länge.
+- Jeder Webhook-Aufruf steht im Log: Ziel, gesendete Header (Token gekürzt),
+  Inhalt, Statuscode, Dauer und die Antwort des Empfängers.
+
+### Geändert
+
+- Fehlermeldungen von Webhooks nennen den Anfang der Antwort, etwa
+  `HTTP 401: {"error":"invalid token"}` statt nur `HTTP 401`.
+- Token und Geheimnisse dürfen bis zu 2000 Zeichen lang sein; Leerzeichen und
+  Zeilenumbrüche am Anfang und Ende werden beim Speichern entfernt.
+
+### Behoben
+
+- Ein Klick auf eine Auswahl-Leiste in einem Formular hat das Formular
+  abgeschickt.
+
 ## [0.4.2] – 2026-10-20
 
 ### Hinzugefügt

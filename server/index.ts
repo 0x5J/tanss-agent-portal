@@ -90,7 +90,34 @@ const updates = createUpdateService({
   source: createReleaseSource({ repo: "0x5J/tanss-agent-portal" }),
 });
 
-const webhooks = createWebhookWatcher({ tanss, store, shared, ticketUrl: config.tanssTicketUrl });
+const webhooks = createWebhookWatcher({
+  tanss,
+  store,
+  shared,
+  ticketUrl: config.tanssTicketUrl,
+  // Every call goes to the log with what was sent and answered: the evidence
+  // when a receiver refuses. Secrets appear only as hints.
+  onCall(call, about) {
+    callLog.add({
+      kind: "webhook",
+      method: "POST",
+      path: call.url,
+      status: call.status,
+      ok: call.ok,
+      durationMs: call.durationMs,
+      message: `${about.webhook} · ${about.what}${call.ok ? "" : ` · ${call.error}`}`,
+      body: call.body,
+      url: call.url,
+      redirected: false,
+      response: call.response,
+      traceId: "",
+      headers: Object.entries(call.headers)
+        .map(([name, value]) => `${name}: ${value}`)
+        .join("\n"),
+    });
+    if (!call.ok) console.log(`[webhook] ${about.webhook} (${about.what}) -> ${call.error}`);
+  },
+});
 
 const app = await buildApp({
   sessionSecret: config.sessionSecret,

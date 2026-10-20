@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type DeliveryRow, type Meta, type WebhookInput } from "../api.ts";
 import { dayAndClock } from "../format.ts";
-import { DEFAULT_TEMPLATE, MAX_TEMPLATE_LENGTH, PLACEHOLDERS, type ListedWebhook } from "../../shared/webhooks.ts";
-import { CheckBox, Dot, SectionTitle, Switch } from "../ui/kit.tsx";
+import {
+  DEFAULT_TEMPLATE,
+  MAX_SECRET_LENGTH,
+  MAX_TEMPLATE_LENGTH,
+  PLACEHOLDERS,
+  isHeaderName,
+  type ListedWebhook,
+  type WebhookAuth,
+} from "../../shared/webhooks.ts";
+import { CheckBox, Dot, SectionTitle, Segmented, Switch } from "../ui/kit.tsx";
 
 type Props = {
   onError: (error: unknown) => void;
@@ -16,8 +24,12 @@ type Form = {
   url: string;
   statusFilter: number[];
   template: string;
+  auth: WebhookAuth;
+  headerName: string;
   secret: string;
   hadSecret: boolean;
+  /** Start, end and length of the stored secret, so it can be checked without showing it. */
+  secretHint: string;
   /** An existing secret is to be dropped on save. */
   dropSecret: boolean;
 };
@@ -28,8 +40,11 @@ const BLANK: Form = {
   url: "",
   statusFilter: [],
   template: DEFAULT_TEMPLATE,
+  auth: "signature",
+  headerName: "",
   secret: "",
   hadSecret: false,
+  secretHint: "",
   dropSecret: false,
 };
 
@@ -40,10 +55,39 @@ function formOf(w: ListedWebhook): Form {
     url: w.url,
     statusFilter: w.statusFilter,
     template: w.template,
+    auth: w.auth,
+    headerName: w.headerName,
     secret: "",
     hadSecret: w.hasSecret,
+    secretHint: w.secretHint,
     dropSecret: false,
   };
+}
+
+/** How each mode presents itself in the form and in the list. */
+const AUTH: Record<WebhookAuth, { label: string; field: string; help: string }> = {
+  signature: {
+    label: "Signatur",
+    field: "Geheimnis",
+    help: "Das Portal signiert jeden Aufruf (Kopfzeile X-Portal-Signature, HMAC-SHA256 über „Zeitstempel.Rumpf“); der Empfänger rechnet nach.",
+  },
+  bearer: {
+    label: "Bearer-Token",
+    field: "Token",
+    help: "Das Portal schickt den Token in der Kopfzeile Authorization: Bearer <Token>.",
+  },
+  header: {
+    label: "Eigener Header",
+    field: "Wert",
+    help: "Das Portal schickt den Wert in der Kopfzeile, die du oben nennst, z. B. X-Api-Key.",
+  },
+};
+
+function authText(w: ListedWebhook): string {
+  if (!w.hasSecret) return "";
+  if (w.auth === "bearer") return " · Bearer";
+  if (w.auth === "header") return ` · Header ${w.headerName}`;
+  return " · signiert";
 }
 
 function hostOf(url: string): string {
@@ -147,6 +191,8 @@ export function WebhooksSettings(props: Props) {
       url: form.url,
       statusFilter: form.statusFilter,
       template: form.template,
+      auth: form.auth,
+      headerName: form.auth === "header" ? form.headerName.trim() : "",
     };
     if (form.secret) input.secret = form.secret;
     else if (form.dropSecret) input.secret = "";
@@ -241,7 +287,8 @@ export function WebhooksSettings(props: Props) {
   }
   const knownIds = new Set(states.map((s) => s.id));
   const unknownIds = form ? form.statusFilter.filter((id) => !knownIds.has(id)) : [];
-  const canSave = form !== null && form.name.trim() !== "" && form.url.trim() !== "" && !saving;
+  const headerOk = form === null || form.auth !== "header" || isHeaderName(form.headerName.trim());
+  const canSave = form !== null && form.name.trim() !== "" && form.url.trim() !== "" && headerOk && !saving;
 
   return (
     <>
@@ -342,7 +389,34 @@ export function WebhooksSettings(props: Props) {
               </span>
             </div>
             <div className="field">
-              <label htmlFor="wh-secret">Geheimnis</label>
+              <label>Anmeldung beim Empfänger</label>
+              <Segmented
+                small
+                onSoft
+                label="Anmeldung"
+                options={(Object.keys(AUTH) as WebhookAuth[]).map((id) => ({ id, label: AUTH[id].label }))}
+                value={form.auth}
+                onChange={(auth) => patch({ auth })}
+              />
+            </div>
+            {form.auth === "header" ? (
+              <div className="field">
+                <label htmlFor="wh-header">Header-Name</label>
+                <input
+                  id="wh-header"
+                  className="input"
+                  value={form.headerName}
+                  maxLength={64}
+                  placeholder="X-Api-Key"
+                  onChange={(e) => patch({ headerName: e.target.value })}
+                />
+                {!headerOk && form.headerName.trim() ? (
+                  <span className="form-help danger">Nur Buchstaben, Ziffern und Bindestriche; nicht Content-Type oder X-Portal-…</span>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="field">
+              <label htmlFor="wh-secret">{AUTH[form.auth].field}</label>
               <div className="wh-secret">
                 <input
                   id="wh-secret"
@@ -350,7 +424,7 @@ export function WebhooksSettings(props: Props) {
                   type="password"
                   autoComplete="new-password"
                   value={form.secret}
-                  maxLength={200}
+                  maxLength={MAX_SECRET_LENGTH}
                   disabled={form.dropSecret}
                   placeholder={form.hadSecret ? (form.dropSecret ? "wird beim Speichern entfernt" : "gesetzt – leer lassen zum Behalten") : "optional"}
                   onChange={(e) => patch({ secret: e.target.value })}
@@ -362,8 +436,15 @@ export function WebhooksSettings(props: Props) {
                 ) : null}
               </div>
               <span className="form-help">
-                Mit Geheimnis signiert das Portal jeden Aufruf (Kopfzeile X-Portal-Signature, HMAC-SHA256 über
-                „Zeitstempel.Rumpf“). Es wird nach dem Speichern nicht mehr angezeigt.
+                {AUTH[form.auth].help} Nach dem Speichern wird der Wert nicht mehr angezeigt
+                {form.hadSecret && form.secretHint && !form.dropSecret ? (
+                  <>
+                    ; gespeichert ist <span className="mono">{form.secretHint}</span>. Leerzeichen und Zeilenumbrüche am
+                    Anfang und Ende werden beim Speichern entfernt.
+                  </>
+                ) : (
+                  ". Leerzeichen und Zeilenumbrüche am Anfang und Ende werden beim Speichern entfernt."
+                )}
               </span>
             </div>
             {formError ? <span className="form-help danger" role="alert">{formError}</span> : null}
@@ -384,7 +465,7 @@ export function WebhooksSettings(props: Props) {
               <strong>{w.name}</strong>
               <span className="small muted wh-meta">
                 {hostOf(w.url)} · {filterText(w)}
-                {w.hasSecret ? " · signiert" : ""}
+                {authText(w)}
                 {w.linkCount > 0 ? ` · ${w.linkCount} ${w.linkCount === 1 ? "Ticket" : "Tickets"}` : ""}
               </span>
             </div>

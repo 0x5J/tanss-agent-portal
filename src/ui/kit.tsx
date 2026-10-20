@@ -71,6 +71,8 @@ export function Segmented<T extends string>(props: {
       {props.options.map((o) => (
         <button
           key={o.id}
+          // Inside a form a plain button submits it; choosing an option must not.
+          type="button"
           role="tab"
           aria-selected={o.id === props.value}
           className={`seg-item${o.id === props.value ? " active" : ""}`}
