@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Entfernt
+
+- Die Seite „Freigaben“ samt Menüpunkt, Kürzel `G F` und Zähler, dazu der
+  Button „Spuren“ an den Lücken in „Zeiten“, der seine Buchungsvorschläge nur
+  dorthin legte. Eine vorhandene `data/proposals.json` wird nicht mehr gelesen
+  und kann gelöscht werden.
+
 ### Geändert
 
 - Installationsanleitung neu geschrieben: welche zwei Dateien es braucht, wie

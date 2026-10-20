@@ -9,7 +9,6 @@ const SECRET = "x".repeat(32);
 const SESSION = { employeeId: 7, apiKey: "Bearer a", refresh: "Bearer r", expire: 9_999_999_999 };
 // 2026-08-23 10:00 Berlin
 const NOW = Date.UTC(2026, 7, 23, 8, 0, 0);
-const DAY = "2026-08-23";
 
 function fakeTanss(overrides: Partial<TanssClient> = {}) {
   const calls: { name: string; args: unknown[] }[] = [];
@@ -636,37 +635,6 @@ describe("ticket actions", () => {
     expect(prompts[0]).toContain("Läuft es jetzt?");
     expect(prompts[0]).not.toContain("alte Mail");
     expect((await call("POST", "/me/agent/clean-mail", { ticketId: 1, mailKey: "comment:9" })).statusCode).toBe(404);
-  });
-});
-
-describe("gap proposals", () => {
-  it("turns a gap into a booking proposal, approves it with edits", async () => {
-    const { call, calls, prompts } = await setup('{"ticketId":1,"text":"Backup-Exclusion gesetzt.","reason":"Kommentar 09:00"}');
-    const res = await call("POST", "/me/agent/gap", { day: DAY, start: 9 * 60, end: 10 * 60 });
-    const proposal = res.json().proposal;
-    expect(proposal.booking).toMatchObject({ ticketId: 1, duration: 60, startMinute: 540, typeId: 3, text: "Backup-Exclusion gesetzt." });
-    expect(proposal.evidence.join(" ")).toContain("Exclusion gesetzt");
-    expect(prompts[0]).toContain("zwischen 09:00 und 10:00");
-    expect(prompts[0]).toContain("#1");
-    // Ticket 2 has no trace that day and was not touched: left out.
-    expect(prompts[0]).not.toContain("#2 ·");
-
-    const list = await call("GET", "/me/agent/proposals");
-    expect(list.json().proposals).toHaveLength(1);
-
-    const approved = await call("POST", `/me/agent/proposals/${proposal.id}/approve`, { text: "Angepasst", duration: 45 });
-    expect(approved.json()).toEqual({ ok: true, id: 77 });
-    const created = calls.find((c) => c.name === "createSupport")!.args[1] as Record<string, unknown>;
-    expect(created).toMatchObject({ text: "Angepasst", duration: 45, linkTypeId: 11, linkId: 1, typeId: 3 });
-    expect((await call("GET", "/me/agent/proposals")).json().proposals).toHaveLength(0);
-    expect((await call("DELETE", `/me/agent/proposals/${proposal.id}`)).statusCode).toBe(404);
-  });
-
-  it("answers honestly when the model finds nothing", async () => {
-    const { call } = await setup('{"ticketId":null,"text":"","reason":"Keine Spur"}');
-    const res = await call("POST", "/me/agent/gap", { day: DAY, start: 9 * 60, end: 10 * 60 });
-    expect(res.json()).toEqual({ proposal: null, note: "Keine Spur" });
-    expect((await call("GET", "/me/agent/proposals")).json().proposals).toHaveLength(0);
   });
 });
 

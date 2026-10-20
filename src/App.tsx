@@ -7,7 +7,6 @@ import { TicketsView } from "./views/Tickets.tsx";
 import { TicketDrawer } from "./views/TicketDrawer.tsx";
 import { TimesView } from "./views/Times.tsx";
 import { AnalysisView } from "./views/Analysis.tsx";
-import { ApprovalsView } from "./views/Approvals.tsx";
 import { LogView } from "./views/Log.tsx";
 import { ImportView } from "./views/Import.tsx";
 import { SettingsView } from "./views/Settings.tsx";
@@ -56,7 +55,6 @@ export function App() {
   const [query, setQuery] = useState("");
   const [subtitle, setSubtitle] = useState("");
   const [agent, setAgent] = useState<AgentSettings | null>(null);
-  const [approvalCount, setApprovalCount] = useState(0);
   const [sidebar, setSidebar] = useState(readSidebar);
   const [board, setBoard] = useState<{ rows: TicketRow[]; activity: Record<number, Activity> }>({ rows: [], activity: {} });
   const onBoardData = useCallback((rows: TicketRow[], activity: Record<number, Activity>) => setBoard({ rows, activity }), []);
@@ -100,12 +98,11 @@ export function App() {
     };
   }, []);
 
-  // Agent state: is a model set up, how many proposals wait.
+  // Agent state: is a model set up.
   useEffect(() => {
     if (!employeeId) return;
     let cancelled = false;
     api.agent.settings().then((s) => !cancelled && setAgent(s)).catch(() => null);
-    api.agent.proposals().then((r) => !cancelled && setApprovalCount(r.proposals.length)).catch(() => null);
     return () => {
       cancelled = true;
     };
@@ -190,7 +187,7 @@ export function App() {
     setView(next);
   }
 
-  // g t / g f / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
+  // g t / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
   const chord = useRef<number | null>(null);
   useEffect(() => {
     if (!employeeId) return;
@@ -222,7 +219,7 @@ export function App() {
           setSidebar((o) => !o);
           return;
         }
-        const target = { d: "dashboard", t: "tickets", f: "approvals", z: "times", w: "analysis", i: "import", l: "log", s: "settings" }[key];
+        const target = { d: "dashboard", t: "tickets", z: "times", w: "analysis", i: "import", l: "log", s: "settings" }[key];
         if (target) {
           event.preventDefault();
           goto(target as View);
@@ -265,7 +262,6 @@ export function App() {
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         tanssState={tanssDown ? "gestört" : meta ? "online" : "…"}
         agentModel={agent?.ready ? agent.model : ""}
-        approvalCount={approvalCount}
         update={updateIndicator(updates.overview, updates.now, __APP_VERSION__)}
         onStartUpdate={(version) =>
           void confirmAndStartUpdate(version, { onOverview: updates.replace, onToast: showToast, onError: report })
@@ -337,18 +333,6 @@ export function App() {
             onData={onBoardData}
           />
         ) : null}
-        {view === "approvals" ? (
-          <ApprovalsView
-            meta={meta}
-            reload={reload}
-            onSubtitle={setSubtitle}
-            onError={report}
-            onToast={showToast}
-            onChanged={changed}
-            onOpen={setOpenTicket}
-            onCount={setApprovalCount}
-          />
-        ) : null}
         {view === "settings" ? (
           <SettingsView
             onSubtitle={setSubtitle}
@@ -368,7 +352,6 @@ export function App() {
             onChanged={changed}
             onOpen={setOpenTicket}
             agentReady={Boolean(agent?.ready)}
-            onProposal={() => setApprovalCount((n) => n + 1)}
             initialDay={timesDay ?? undefined}
           />
         ) : null}

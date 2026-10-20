@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
 import type { UpdateIndicator } from "../shared/update.ts";
 
-export type View = "dashboard" | "tickets" | "approvals" | "times" | "analysis" | "import" | "log" | "settings";
+export type View = "dashboard" | "tickets" | "times" | "analysis" | "import" | "log" | "settings";
 
 const NAV: { id: View; label: string; key: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", key: "G D", icon: "M4 20V10m6 10V4m6 16v-7M3 20h18" },
   { id: "tickets", label: "Tickets", key: "G T", icon: "M4 6h16M4 12h16M4 18h10" },
-  { id: "approvals", label: "Freigaben", key: "G F", icon: "M20 6 9 17l-5-5" },
   { id: "times", label: "Zeiten", key: "G Z", icon: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0" },
   { id: "analysis", label: "Auswertung", key: "G W", icon: "M4 19h16M7 16V9m5 7V5m5 11v-4" },
   { id: "import", label: "Import", key: "G I", icon: "M12 3v12m0 0-4-4m4 4 4-4M4 19h16" },
@@ -24,7 +23,6 @@ const UPDATE_DOT: Record<UpdateIndicator["tone"], string> = {
 const TITLES: Record<View, string> = {
   dashboard: "Dashboard",
   tickets: "Tickets",
-  approvals: "Freigaben",
   times: "Zeiten",
   analysis: "Auswertung",
   import: "Tagesimport",
@@ -40,7 +38,6 @@ type Props = {
   tanssState: string;
   /** Model name when the local AI is set up, empty otherwise. */
   agentModel: string;
-  approvalCount: number;
   /** Running version or pending update; a click starts the update (after asking) or opens the settings. */
   update: UpdateIndicator;
   onStartUpdate: (version: string) => void;
@@ -79,9 +76,6 @@ export function Shell(props: Props) {
                 </span>
                 <span>{item.label}</span>
               </span>
-              {item.id === "approvals" && props.approvalCount > 0 ? (
-                <span className="nav-count">{props.approvalCount}</span>
-              ) : null}
               <span className="key">{item.key}</span>
             </button>
           ))}

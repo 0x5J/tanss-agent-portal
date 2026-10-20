@@ -304,7 +304,7 @@ Hand ist immer erlaubt.
 
 Alles läuft gegen einen OpenAI-kompatiblen Endpoint auf dem eigenen Rechner
 oder im eigenen Netz (oMLX, Ollama, LM Studio, vLLM). Der Agent schreibt nie
-selbst nach TANSS: Entwürfe landen im Textfeld, Buchungen in den Freigaben.
+selbst nach TANSS: Entwürfe landen im Textfeld, Buchungen machst du selbst.
 
 | Funktion | Wo | Was das Modell bekommt |
 | --- | --- | --- |
@@ -322,7 +322,6 @@ selbst nach TANSS: Entwürfe landen im Textfeld, Buchungen in den Freigaben.
 | Aus Issue formulieren | Tagesimport, je Zeile | die eigenen Linear-Notizen des Tages, in einen Leistungstext im eigenen Stil gebracht |
 | Tagesassistent | Zeiten, „Was fehlt noch?" | ein Aufruf über Buchungen, offene Termine und Anrufe, Linear-Aktivität, Lücken, Bausteine und Wiederkehrendes; trennt Belegtes von Vermutetem |
 | Chat-Sidebar (g a) | rechts, einklappbar | Frage frei formulieren; der Agent sucht und liest selbst nach: `tickets_suchen`, `ticket_lesen`, `leistungen_ticket` (nur lesend, max. 4 Runden, 6 Aufrufe, 3 Verläufe; nach 120 s werden keine weiteren Werkzeuge mehr gestartet). Fest dabei sind die offenen Tickets (meine zuerst, max. 80), die heutigen Buchungen und das geöffnete Ticket. Unter der Antwort steht, was gesucht und gelesen wurde; ein Knopf kopiert sie. Antwortet nur, führt nichts aus. Verlauf bleibt im Browser (letzte 40 Nachrichten). Kann das Modell keine Werkzeuge, gilt der alte Weg mit `#`-Nennung |
-| Agent fragen | Zeiten, Lückenkarte | eigene Tickets mit Spuren an dem Tag (eigene Kommentare, Änderungen; max. 12 Verläufe) und die Buchungen des Tages → ein Buchungsvorschlag in den Freigaben oder „kein Anhaltspunkt" |
 
 **Kontextbudget.** In den Einstellungen steht das Kontextfenster des Modells (Standard 32.768 Tokens). Daraus leitet `shared/agent.ts::threadBudget()` ab, wie viele Zeichen eines Ticketverlaufs ein Prompt bekommt: 70 % des Fensters abzüglich 2.500 Token Reserve, bei 3,2 Zeichen/Token, begrenzt auf 8.000–120.000 Zeichen (32k → ~68.000 Zeichen, 128k → 120.000). Der Verlauf wird von neu nach alt gefüllt, einzelne Einträge auf ein Viertel des Budgets gekappt, Mails ohne Zitate und Signaturen. Im Chat zieht jeder gelesene Verlauf ein Drittel des Budgets; ist es aufgebraucht, sagt das Werkzeug das, statt still zu kürzen. Listen bekommen nur Zeilen (Briefing 25 je Kategorie, Muster 80, Ähnliche 60).
 
