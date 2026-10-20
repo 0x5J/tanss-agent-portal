@@ -491,6 +491,7 @@ Für Änderungen am Code braucht es einen Klon des Repos und Node.js ≥ 22:
 ```bash
 cp .env.example .env    # Pflichtwerte eintragen
 npm install
+npm install --prefix updater
 npm run dev             # API auf :3848, Oberfläche auf :5173
 npm run check           # Typen + Tests
 ```
