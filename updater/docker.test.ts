@@ -136,6 +136,35 @@ describe("createDockerApi", () => {
     await expect(api().pullImage("x", "1.0.0")).rejects.toThrow("denied: nope");
   });
 
+  it("pullImage: returns the digest from the pull stream", async () => {
+    const digest = "sha256:" + "a".repeat(64);
+    handler = (_req, res) => {
+      res.writeHead(200);
+      res.write('{"status":"Pulling from x"}\n');
+      res.write(`{"status":"Digest: ${digest}"}\n`);
+      res.end('{"status":"Status: Downloaded newer image"}\n');
+    };
+    await expect(api().pullImage("x", "1.0.0")).resolves.toBe(digest);
+  });
+
+  it("pullImage: returns null when the pull stream names no digest", async () => {
+    handler = (_req, res) => {
+      res.writeHead(200);
+      res.end('{"status":"Pulling from x"}\n{"status":"Status: Image is up to date"}\n');
+    };
+    await expect(api().pullImage("x", "1.0.0")).resolves.toBeNull();
+  });
+
+  it("pullImage: ignores a malformed digest", async () => {
+    for (const bad of ["sha256:" + "a".repeat(63), "sha256:" + "A".repeat(64), "sha256:" + "a".repeat(65), "sha512:" + "a".repeat(64)]) {
+      handler = (_req, res) => {
+        res.writeHead(200);
+        res.end(`{"status":"Digest: ${bad}"}\n`);
+      };
+      await expect(api().pullImage("x", "1.0.0")).resolves.toBeNull();
+    }
+  });
+
   it("tagImage: POST /images/<ref>/tag?repo&tag", async () => {
     handler = (_req, res) => {
       res.writeHead(201);
@@ -184,6 +213,26 @@ describe("createDockerApi", () => {
     await api().removeContainer("abc");
     expect(seen[0].method).toBe("DELETE");
     expect(seen[0].url).toBe("/v1.43/containers/abc?force=1");
+  });
+
+  it("removeImage: DELETE /images/<ref urlencoded> without force", async () => {
+    handler = (_req, res) => json(res, 200, [{ Untagged: "ghcr.io/x:1" }]);
+    await api().removeImage("ghcr.io/x:1.0.0");
+    expect(seen[0].method).toBe("DELETE");
+    expect(seen[0].url).toBe("/v1.43/images/ghcr.io%2Fx%3A1.0.0");
+  });
+
+  it("removeImage: a failure becomes DockerError with the status", async () => {
+    handler = (_req, res) => json(res, 409, { message: "image is being used by running container abc" });
+    const err = await api()
+      .removeImage("ghcr.io/x:1.0.0")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(DockerError);
+    expect((err as DockerError).status).toBe(409);
+    expect((err as DockerError).message).toContain("being used");
   });
 
   it("renameContainer: POST /rename?name=", async () => {

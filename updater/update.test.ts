@@ -11,6 +11,7 @@ const NAME = "agent-portal-portal-1";
 const OLD_IP = "172.18.0.3";
 const NEW_IP = "172.18.0.7";
 const NEW_IMAGE_ID = "sha256:new-image";
+const NEW_DIGEST = "sha256:" + "b".repeat(64);
 
 type Method = keyof DockerApi;
 type Call = [Method, ...unknown[]];
@@ -112,6 +113,10 @@ function fakeDocker(
     },
     async pullImage(repo, tag) {
       record("pullImage", repo, tag);
+      return NEW_DIGEST;
+    },
+    async removeImage(ref) {
+      record("removeImage", ref);
     },
     async tagImage(ref, repo, tag) {
       record("tagImage", ref, repo, tag);
