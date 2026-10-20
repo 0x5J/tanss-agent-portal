@@ -55,3 +55,27 @@
 @media (max-width: 900px) {
   .settings-tabs { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; }
 }
+
+/* Webhooks: list of targets, form, delivery log. */
+.wh-item.off .name strong { color: var(--body); }
+.wh-meta { overflow-wrap: anywhere; }
+.wh-form .wh-states { display: flex; flex-wrap: wrap; gap: 8px; }
+.wh-state {
+  display: inline-flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
+  padding: 6px 14px 6px 10px; font-size: 13px; color: var(--ink); cursor: pointer; transition: background 150ms ease;
+}
+.wh-state:hover { background: var(--soft2); }
+.wh-state.on { border-color: var(--ink); }
+.wh-template { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; }
+.wh-placeholders { display: flex; flex-wrap: wrap; gap: 6px; }
+.wh-placeholder {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 16px; color: var(--ink);
+  background: var(--soft2); border: 0; border-radius: 999px; padding: 3px 10px; cursor: pointer;
+}
+.wh-placeholder:hover { background: var(--pressed); }
+.wh-secret { display: flex; gap: 8px; align-items: center; }
+.wh-secret .input { flex: 1; min-width: 0; }
+.wh-log { min-width: 720px; }
+.wh-row { grid-template-columns: 104px minmax(0, 1.2fr) 72px minmax(0, 1.6fr) minmax(0, 1.4fr) 116px; gap: 12px; padding: 8px 4px; }
+.wh-row .wh-act { display: flex; justify-content: flex-end; }
+.wh-result { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }

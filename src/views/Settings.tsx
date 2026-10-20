@@ -14,6 +14,7 @@ import {
 import { DEFAULT_STYLE_RULES, MAX_EXAMPLES, type StyleSettings } from "../../shared/style.ts";
 import { confirmAndStartUpdate } from "../UpdateBanner.tsx";
 import { Dot, Icon, PageHeader, SectionTitle, Segmented } from "../ui/kit.tsx";
+import { WebhooksSettings } from "./WebhooksSettings.tsx";
 import "../styles/settings.css";
 
 type Theme = "light" | "dark";
@@ -30,13 +31,14 @@ type Props = {
   onTheme?: (theme: Theme) => void;
 };
 
-type Tab = "general" | "connections" | "ai" | "agent" | "texts";
+type Tab = "general" | "connections" | "ai" | "agent" | "webhooks" | "texts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "Allgemein" },
   { id: "connections", label: "Verbindungen" },
   { id: "ai", label: "Lokale KI" },
   { id: "agent", label: "Agent" },
+  { id: "webhooks", label: "Webhooks" },
   { id: "texts", label: "Texte & Bausteine" },
 ];
 
@@ -384,6 +386,8 @@ export function SettingsView(props: Props) {
               </section>
             </>
           ) : null}
+
+          {tab === "webhooks" ? <WebhooksSettings onError={onError} onToast={props.onToast} /> : null}
 
           {tab === "texts" ? (
             <>

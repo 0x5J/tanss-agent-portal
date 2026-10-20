@@ -8,6 +8,7 @@ import type { StyleSettings } from "../shared/style.ts";
 import type { ImportRules, Suggestion, WorkflowState } from "../shared/import.ts";
 import type { Target } from "../shared/mapping.ts";
 import type { UpdateOverview } from "../shared/update.ts";
+import type { Delivery, PublicWebhook, WebhookLink } from "../shared/webhooks.ts";
 
 export type ImportBookItem = {
   issue: string;
@@ -103,7 +104,36 @@ export type Briefing = { text: string; facts: BriefingFacts; createdAt: number; 
 export type RowsPayload = { rows: TicketRow[]; activity: Record<number, Activity>; force?: boolean };
 export type BriefingPayload = RowsPayload & { scope: string; label?: string };
 
+/** What the form sends; `secret` left out keeps the stored one, "" removes it. */
+export type WebhookInput = {
+  name: string;
+  url: string;
+  statusFilter?: number[];
+  template?: string;
+  secret?: string;
+  active?: boolean;
+};
+/** A delivery as the log shows it: the body stays on the server. */
+export type DeliveryRow = Omit<Delivery, "body">;
+
 export const api = {
+  webhooks: {
+    list: () => request<{ webhooks: PublicWebhook[] }>("GET", "/me/webhooks"),
+    create: (input: WebhookInput) => request<{ webhook: PublicWebhook }>("POST", "/me/webhooks", input),
+    update: (id: string, input: WebhookInput) =>
+      request<{ webhook: PublicWebhook }>("PUT", `/me/webhooks/${encodeURIComponent(id)}`, input),
+    remove: (id: string) => request<{ ok: true }>("DELETE", `/me/webhooks/${encodeURIComponent(id)}`),
+    test: (id: string) =>
+      request<{ ok: boolean; status: number; error: string }>("POST", `/me/webhooks/${encodeURIComponent(id)}/test`, {}),
+    deliveries: () => request<{ deliveries: DeliveryRow[] }>("GET", "/me/webhooks/deliveries"),
+    resend: (id: string) =>
+      request<{ delivery: DeliveryRow }>("POST", `/me/webhooks/deliveries/${encodeURIComponent(id)}/resend`, {}),
+    links: (ticketId: number) => request<{ links: WebhookLink[] }>("GET", `/me/tickets/${ticketId}/webhooks`),
+    attach: (ticketId: number, webhookId: string, once: boolean) =>
+      request<{ link: WebhookLink }>("POST", `/me/tickets/${ticketId}/webhooks`, { webhookId, once }),
+    detach: (ticketId: number, webhookId: string) =>
+      request<{ ok: true }>("DELETE", `/me/tickets/${ticketId}/webhooks/${encodeURIComponent(webhookId)}`),
+  },
   config: () => request<AuthConfig>("GET", "/auth/config"),
   me: () => request<{ employeeId: number }>("GET", "/auth/me"),
   login: (username: string, password: string, token: string) =>
