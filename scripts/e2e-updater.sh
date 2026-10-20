@@ -4,7 +4,12 @@
 # Starts a throwaway registry on 127.0.0.1:5055, builds portal images 9.9.1,
 # 9.9.2 and 9.9.3 (9.9.3 exits right away), builds the updater locally and runs
 # both in the compose project "e2e-updater" from a temp folder. Then it drives
-# three update requests through data/update/request.json:
+# update requests through data/update/request.json:
+#   9.9.2 with the real updater -> failed: the local image has no provenance
+#     attestation at GitHub (needs internet), the portal stays on 9.9.1 and the
+#     pulled image is removed again.
+#   Then the updater is swapped for a test-only image (e2e-updater/updater:
+#     e2e-stub) whose provenance check always passes, and:
 #   9.9.2 -> done, 9.9.3 -> rolledBack, 9.9.9 (missing) -> failed.
 #
 # Safety: the script only creates, stops and removes its own resources (compose
@@ -22,6 +27,9 @@ REGISTRY_PORT=5055
 REGISTRY=127.0.0.1:$REGISTRY_PORT
 PORTAL_REPO=$REGISTRY/tanss-agent-portal
 UPDATER_IMAGE=e2e-updater/updater:e2e
+# Test only: UPDATER_IMAGE with a provenance check that accepts everything.
+STUB_IMAGE=e2e-updater/updater:e2e-stub
+STUB_VERSION=0.0.0-e2e-stub
 HOST_PORT=3898
 HEALTH_URL=http://127.0.0.1:$HOST_PORT/health
 STATUS_TIMEOUT=180
@@ -73,7 +81,7 @@ cleanup() {
   if docker container inspect "$REGISTRY_NAME" >/dev/null 2>&1; then
     docker rm -f -v "$REGISTRY_NAME" >/dev/null
   fi
-  for img in "$PORTAL_REPO:9.9.1" "$PORTAL_REPO:9.9.2" "$PORTAL_REPO:9.9.3" "$PORTAL_REPO:e2e" "$UPDATER_IMAGE"; do
+  for img in "$PORTAL_REPO:9.9.1" "$PORTAL_REPO:9.9.2" "$PORTAL_REPO:9.9.3" "$PORTAL_REPO:e2e" "$STUB_IMAGE" "$UPDATER_IMAGE"; do
     if docker image inspect "$img" >/dev/null 2>&1; then docker rmi "$img" >/dev/null; fi
   done
   if [ "$REGISTRY_PULLED" = 1 ] && docker image inspect "$REGISTRY_IMAGE" >/dev/null 2>&1; then
@@ -224,7 +232,9 @@ push() {
 
 mkdir -p "$LOG_DIR" "$UPDATE_DIR"
 
-cat >"$COMPOSE_FILE" <<EOF
+# Writes the compose file; $1 is the updater image.
+write_compose() {
+  cat >"$COMPOSE_FILE" <<EOF
 # Mirrors the two services of compose.yaml with local images and port $HOST_PORT.
 services:
   portal:
@@ -248,9 +258,9 @@ services:
       - no-new-privileges:true
 
   updater:
-    image: $UPDATER_IMAGE
+    image: $1
     restart: unless-stopped
-    stop_grace_period: 2m
+    stop_grace_period: 4m
     environment:
       PORTAL_REPO: $PORTAL_REPO
     volumes:
@@ -259,6 +269,8 @@ services:
     security_opt:
       - no-new-privileges:true
 EOF
+}
+write_compose "$UPDATER_IMAGE"
 
 cat >"$RUN_DIR/.env" <<EOF
 TANSS_BASE_URL=http://127.0.0.1:9
@@ -308,6 +320,22 @@ build portal-9.9.3 -t "$PORTAL_REPO:9.9.3" "$WORK/src-9.9.3"
 
 build updater -f "$REPO_ROOT/updater/Dockerfile" --build-arg UPDATER_VERSION=0.0.0-e2e -t "$UPDATER_IMAGE" "$REPO_ROOT"
 
+# Test-only updater: same image, but provenance.ts replaced by a stub that
+# accepts every image. Never published; only this script builds and uses it.
+mkdir -p "$WORK/updater-stub"
+cat >"$WORK/updater-stub/provenance.ts" <<'EOF'
+// E2E stub: accepts every image without asking GitHub or Sigstore.
+export function createImageVerifier(_opts: { source: string }): (digest: string, version: string) => Promise<void> {
+  return async () => {};
+}
+EOF
+cat >"$WORK/updater-stub/Dockerfile" <<EOF
+FROM $UPDATER_IMAGE
+ENV UPDATER_VERSION=$STUB_VERSION
+COPY provenance.ts /app/updater/provenance.ts
+EOF
+build updater-stub -t "$STUB_IMAGE" "$WORK/updater-stub"
+
 log "Pushe Images nach $REGISTRY …"
 for tag in 9.9.1 e2e 9.9.2 9.9.3; do push "$PORTAL_REPO:$tag"; done
 # The updater must really pull 9.9.2 and 9.9.3 from the registry.
@@ -328,7 +356,52 @@ done
 log "Portal 9.9.1 und Updater laufen"
 guard "nach dem Start"
 
-# --- case 1: 9.9.2 -> done --------------------------------------------------
+# --- case 1: 9.9.2 with the real provenance check -> failed ----------------
+
+guard "vor Fall Herkunft 9.9.2"
+before=$(portal_id)
+id=$(request_update 9.9.2)
+log "Auftrag $id: 9.9.2 (echte Herkunftsprüfung)"
+result=$(wait_status "$id") || fail "Herkunft 9.9.2: kein Endstatus nach ${STATUS_TIMEOUT}s"
+log "Status: $result"
+[ "${result%% *}" = failed ] || fail "Herkunft 9.9.2: erwartet failed, bekommen: $result"
+wait_version 9.9.1 5 || fail "Herkunft 9.9.2: /health meldet nicht mehr 9.9.1"
+[ "$(portal_id)" = "$before" ] || fail "Herkunft 9.9.2: Portal-Container wurde angefasst"
+count=$(portal_count)
+[ "$count" = 1 ] || fail "Herkunft 9.9.2: $count Portal-Container statt genau einem"
+if docker image inspect "$PORTAL_REPO:9.9.2" >/dev/null 2>&1; then
+  fail "Herkunft 9.9.2: abgelehntes Image $PORTAL_REPO:9.9.2 ist noch vorhanden"
+fi
+guard "nach Fall Herkunft 9.9.2"
+case "$result" in
+  *"nicht bestätigt"*) pass "Herkunft 9.9.2 -> failed (nicht bestätigt), Portal unverändert, Image entfernt" ;;
+  *)
+    echo "WARN: Herkunft 9.9.2: unerwartete Meldung (Netzwerk?): $result" >&2
+    pass "Herkunft 9.9.2 -> failed, Portal unverändert, Image entfernt (Meldung abweichend)"
+    ;;
+esac
+
+# --- switch to the test-only updater with an accepting provenance check -----
+
+guard "vor Wechsel auf Prüf-Attrappe"
+before=$(portal_id)
+write_compose "$STUB_IMAGE"
+log "Ersetze den Updater durch $STUB_IMAGE …"
+(cd "$RUN_DIR" && compose up -d --no-deps updater) >"$LOG_DIR/up-stub.log" 2>&1 \
+  || { cat "$LOG_DIR/up-stub.log" >&2; fail "Updater-Attrappe startet nicht"; }
+i=0
+until grep -q "\"$STUB_VERSION\"" "$UPDATE_DIR/heartbeat.json" 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -lt 30 ] || fail "Updater-Attrappe schreibt keinen Heartbeat"
+  sleep 1
+done
+[ "$(portal_id)" = "$before" ] || fail "Wechsel auf Prüf-Attrappe hat den Portal-Container angefasst"
+[ "$(compose ps -q updater | xargs docker container inspect -f '{{.Config.Image}}')" = "$STUB_IMAGE" ] \
+  || fail "Updater läuft nicht mit $STUB_IMAGE"
+guard "nach Wechsel auf Prüf-Attrappe"
+log "Updater-Attrappe läuft, Portal unverändert"
+
+# --- case 2: 9.9.2 -> done --------------------------------------------------
 
 guard "vor Fall 9.9.2"
 before=$(portal_id)
@@ -362,7 +435,7 @@ fi
 guard "nach Fall 9.9.2"
 pass "9.9.2 -> done, /health 9.9.2, ein Portal-Container, compose up -d lässt den Container stehen"
 
-# --- case 2: 9.9.3 -> rolledBack -------------------------------------------
+# --- case 3: 9.9.3 -> rolledBack -------------------------------------------
 
 guard "vor Fall 9.9.3"
 before=$(portal_id)
@@ -378,7 +451,7 @@ count=$(portal_count)
 guard "nach Fall 9.9.3"
 pass "9.9.3 -> rolledBack, /health weiter 9.9.2"
 
-# --- case 3: 9.9.9 (missing) -> failed -------------------------------------
+# --- case 4: 9.9.9 (missing) -> failed -------------------------------------
 
 guard "vor Fall 9.9.9"
 before=$(portal_id)
