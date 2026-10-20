@@ -13,6 +13,17 @@ export function signature(secret: string, timestamp: number, body: string): stri
   return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
 }
 
+function errorText(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  const cause: unknown = e.cause;
+  if (typeof cause === "object" && cause !== null) {
+    const { code, message } = cause as { code?: unknown; message?: unknown };
+    const detail = typeof code === "string" && code ? code : typeof message === "string" ? message : "";
+    if (detail) return `${e.message} (${detail})`;
+  }
+  return e.message;
+}
+
 /** One call to the target. Never throws: every failure becomes a result. */
 export async function send(
   fetcher: Fetcher,
@@ -29,8 +40,11 @@ export async function send(
       method: "POST",
       headers,
       body: opts.body,
+      // A redirect would turn the call into a body-less GET; treat it as a failure.
+      redirect: "manual",
       signal: AbortSignal.timeout(opts.timeoutMs ?? SEND_TIMEOUT_MS),
     });
+    void res.body?.cancel().catch(() => {});
     if (res.ok) return { ok: true, status: res.status, error: "" };
     return { ok: false, status: res.status, error: `HTTP ${res.status}` };
   } catch (e) {
@@ -38,7 +52,7 @@ export async function send(
     if (name === "TimeoutError" || name === "AbortError") {
       return { ok: false, status: 0, error: "Zeitlimit überschritten" };
     }
-    return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, status: 0, error: errorText(e) };
   }
 }
 

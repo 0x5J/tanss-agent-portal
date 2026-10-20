@@ -73,6 +73,35 @@ describe("webhook sender", () => {
     expect(await send(boom, base)).toEqual({ ok: false, status: 0, error: "ECONNREFUSED" });
   });
 
+  it("does not follow redirects", async () => {
+    const seen: RequestInit[] = [];
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      seen.push(init);
+      return new Response(null, { status: 301, headers: { location: "http://elsewhere" } });
+    }) as unknown as Fetcher;
+    expect(await send(fetcher, base)).toEqual({ ok: false, status: 301, error: "HTTP 301" });
+    expect(seen[0].redirect).toBe("manual");
+  });
+
+  it("appends the cause of a thrown error", async () => {
+    const withCode = (async () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" }) });
+    }) as unknown as Fetcher;
+    expect(await send(withCode, base)).toEqual({ ok: false, status: 0, error: "fetch failed (ECONNREFUSED)" });
+    const withMessage = (async () => {
+      throw new TypeError("fetch failed", { cause: new Error("bad certificate") });
+    }) as unknown as Fetcher;
+    expect(await send(withMessage, base)).toEqual({ ok: false, status: 0, error: "fetch failed (bad certificate)" });
+  });
+
+  it("releases the response body", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({ cancel: () => { cancelled = true; } });
+    const fetcher = (async () => new Response(body, { status: 200 })) as unknown as Fetcher;
+    expect((await send(fetcher, base)).ok).toBe(true);
+    expect(cancelled).toBe(true);
+  });
+
   it("aborts a hanging call with a timeout message", async () => {
     const hanging = ((_u: string, init: RequestInit) =>
       new Promise((_resolve, reject) => {
