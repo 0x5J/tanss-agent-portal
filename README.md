@@ -471,7 +471,10 @@ Zustellungen und die letzten 200 abgeschlossenen.
 
 **Fehlersuche.** Jeder Webhook-Aufruf steht auch im **Log** (Quelle „Webhook“):
 Ziel-URL, die gesendeten Header, der Inhalt, Statuscode, Dauer und die Antwort
-des Empfängers im Wortlaut. Token und Header-Werte erscheinen dort nur gekürzt.
+des Empfängers im Wortlaut. Token und Header-Werte erscheinen dort nur gekürzt,
+und jeder Techniker sieht nur die Aufrufe seiner eigenen Webhooks. In die
+Konsole bzw. das Container-Log schreibt das Portal bei einem Fehler nur den
+Statuscode, nicht die Antwort.
 Antwortet der Empfänger mit 401 oder 403, liegt es meist an der Anmeldung: Prüfe,
 ob die gewählte Art zu dem passt, was der Empfänger erwartet, und ob der
 gespeicherte Wert nach Anfang, Ende und Länge stimmt.

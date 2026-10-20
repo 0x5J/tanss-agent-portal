@@ -74,7 +74,7 @@ export function createWebhookWatcher(opts: {
   fetcher?: Fetcher;
   now?: () => number;
   /** Every call that went out, for the portal's log: which webhook, what for. */
-  onCall?: (call: WebhookCall, about: { webhook: string; what: string }) => void;
+  onCall?: (call: WebhookCall, about: { employeeId: number; webhook: string; what: string }) => void;
 }): WebhookWatcher {
   const { tanss, store, shared } = opts;
   const fetcher = opts.fetcher ?? fetch;
@@ -90,7 +90,7 @@ export function createWebhookWatcher(opts: {
   const markKey = (employeeId: number, ticketId: number) => `${employeeId}:${ticketId}`;
 
   /** One call with the webhook's current URL, auth and secret. */
-  function sendFor(w: Webhook, call: { body: string; deliveryId: string; what: string }): Promise<SendResult> {
+  function sendFor(employeeId: number, w: Webhook, call: { body: string; deliveryId: string; what: string }): Promise<SendResult> {
     return send(fetcher, {
       url: w.url,
       body: call.body,
@@ -99,7 +99,7 @@ export function createWebhookWatcher(opts: {
       auth: w.auth,
       headerName: w.headerName,
       nowUnix: seconds(),
-      onCall: opts.onCall ? (c) => opts.onCall!(c, { webhook: w.name, what: call.what }) : undefined,
+      onCall: opts.onCall ? (c) => opts.onCall!(c, { employeeId, webhook: w.name, what: call.what }) : undefined,
     });
   }
 
@@ -310,7 +310,7 @@ export function createWebhookWatcher(opts: {
           // The delivery records where the attempt actually went.
           const what = `#${d.ticketId} ${d.statusOld} → ${d.statusNew}${d.attempts > 0 ? ` · Versuch ${d.attempts + 1}` : ""}`;
           const next: Delivery = w
-            ? afterAttempt({ ...d, url: w.url }, await sendFor(w, { body: d.body, deliveryId: d.id, what }), at)
+            ? afterAttempt({ ...d, url: w.url }, await sendFor(employeeId, w, { body: d.body, deliveryId: d.id, what }), at)
             : { ...d, state: "failed", result: DELETED, finishedAt: at };
           store.setWebhookDeliveries(
             employeeId,
@@ -363,7 +363,7 @@ export function createWebhookWatcher(opts: {
       } catch (error) {
         return { ok: false, status: 0, error: error instanceof Error ? error.message : "Vorlage ungültig" };
       }
-      return sendFor(w, { body, deliveryId: newId(), what: "Test" });
+      return sendFor(employeeId, w, { body, deliveryId: newId(), what: "Test" });
     },
     resend(employeeId, deliveryId) {
       const list = store.webhookDeliveries(employeeId);

@@ -40,8 +40,8 @@ const webhookSchema = z.object({
   template: z.string().max(MAX_TEMPLATE_LENGTH).optional(),
   auth: z.enum(AUTH_MODES as [string, ...string[]]).optional(),
   headerName: z.string().trim().max(64).optional(),
-  // Pasted tokens often bring a line break or a space along; they are never part of it.
-  secret: z.string().trim().max(MAX_SECRET_LENGTH).optional(),
+  // Trimmed in parseBody: a pasted token often brings a line break along.
+  secret: z.string().max(MAX_SECRET_LENGTH + 100).optional(),
   active: z.boolean().optional(),
 });
 
@@ -85,11 +85,21 @@ export function registerWebhookRoutes(app: FastifyInstance, deps: WebhookRouteDe
   function parseBody(body: unknown): { ok: true; data: z.infer<typeof webhookSchema> } | { ok: false; error: string } {
     const parsed = webhookSchema.safeParse(body);
     if (!parsed.success) return { ok: false, error: "Webhook ungültig" };
-    if (parsed.data.template === undefined) return { ok: true, data: parsed.data };
-    const template = parsed.data.template.trim() ? parsed.data.template : DEFAULT_TEMPLATE;
+    const data = { ...parsed.data };
+    // Spaces and line breaks around a pasted token are never part of it. Only
+    // an explicit "" removes the stored secret: a value of nothing but
+    // whitespace is a slip (invisible in a password field), not a request.
+    if (data.secret !== undefined && data.secret !== "") {
+      const secret = data.secret.trim();
+      if (!secret) return { ok: false, error: "Der eingetragene Wert besteht nur aus Leerzeichen" };
+      if (secret.length > MAX_SECRET_LENGTH) return { ok: false, error: "Webhook ungültig" };
+      data.secret = secret;
+    }
+    if (data.template === undefined) return { ok: true, data };
+    const template = data.template.trim() ? data.template : DEFAULT_TEMPLATE;
     const error = templateError(template);
     if (error) return { ok: false, error };
-    return { ok: true, data: { ...parsed.data, template } };
+    return { ok: true, data: { ...data, template } };
   }
 
   app.get("/me/webhooks", async (request, reply) => {

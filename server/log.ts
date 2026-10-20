@@ -59,3 +59,11 @@ export function loggableBody(path: string, body: unknown): string {
     return "";
   }
 }
+
+/**
+ * What one technician may see: everything crossing the TANSS boundary, but of
+ * the webhook calls only their own — a target URL can itself be the secret.
+ */
+export function visibleLog(entries: LogEntry[], employeeId: number): LogEntry[] {
+  return entries.filter((entry) => entry.kind !== "webhook" || entry.employeeId === employeeId);
+}

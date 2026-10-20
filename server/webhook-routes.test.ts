@@ -119,6 +119,22 @@ describe("webhook routes", () => {
     expect(back.json().webhook).toMatchObject({ auth: "signature", headerName: "" });
   });
 
+  it("refuses a secret of only whitespace instead of dropping the stored one", async () => {
+    const { login, call, store } = await setup();
+    const cookie = await login(7);
+    const id = (await call(cookie, "POST", "/me/webhooks", { ...hookBody, auth: "bearer" })).json().webhook.id as string;
+    for (const blank of [" ", "\n", " \t\r\n "]) {
+      const res = await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", secret: blank });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("Der eingetragene Wert besteht nur aus Leerzeichen");
+    }
+    expect((await call(cookie, "POST", "/me/webhooks", { ...hookBody, secret: "  " })).statusCode).toBe(400);
+    expect(store.webhooks(7)[0]!.secret).toBe("geheim");
+    // an explicit empty string still removes it
+    await call(cookie, "PUT", `/me/webhooks/${id}`, { name: "Teams", url: "https://hook.example/a", secret: "" });
+    expect(store.webhooks(7)[0]!.secret).toBe("");
+  });
+
   it("keeps every omitted optional field on PUT", async () => {
     const { login, call, store } = await setup();
     const cookie = await login(7);

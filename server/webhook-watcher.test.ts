@@ -529,7 +529,7 @@ describe("webhook watcher", () => {
   });
 
   it("reports test calls and deliveries with their webhook and purpose", async () => {
-    const reported: { what: string; webhook: string; auth: string | undefined }[] = [];
+    const reported: { employeeId: number; what: string; webhook: string; auth: string | undefined }[] = [];
     const { watcher, clock } = setup({
       webhooks: [hook({ auth: "bearer", secret: "tok_abcdefghijklmnop" })],
       onCall: (call, about) => reported.push({ ...about, auth: call.headers.Authorization }),
@@ -539,8 +539,8 @@ describe("webhook watcher", () => {
     clock.now += 1;
     await watcher.flush();
     expect(reported).toEqual([
-      { webhook: "Teams", what: "Test", auth: "Bearer tok_…op (20 Zeichen)" },
-      { webhook: "Teams", what: "#42 Neu → Erledigt", auth: "Bearer tok_…op (20 Zeichen)" },
+      { employeeId: 7, webhook: "Teams", what: "Test", auth: "Bearer tok_…op (20 Zeichen)" },
+      { employeeId: 7, webhook: "Teams", what: "#42 Neu → Erledigt", auth: "Bearer tok_…op (20 Zeichen)" },
     ]);
   });
 

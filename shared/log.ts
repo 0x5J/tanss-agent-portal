@@ -24,6 +24,8 @@ export type LogEntry = {
   traceId: string;
   /** Request headers as sent, one per line; only for webhook calls, secrets shown as hints. */
   headers?: string;
+  /** Whose webhook made the call; such entries are shown to that technician only. */
+  employeeId?: number;
 };
 
 export const LOG_LIMIT = 300;

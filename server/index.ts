@@ -114,8 +114,11 @@ const webhooks = createWebhookWatcher({
       headers: Object.entries(call.headers)
         .map(([name, value]) => `${name}: ${value}`)
         .join("\n"),
+      employeeId: about.employeeId,
     });
-    if (!call.ok) console.log(`[webhook] ${about.webhook} (${about.what}) -> ${call.error}`);
+    // The console only gets the outcome: an answer may quote the token back,
+    // and container logs outlive the in-memory log.
+    if (!call.ok) console.log(`[webhook] ${about.webhook} (${about.what}) -> ${call.status ? `HTTP ${call.status}` : call.error}`);
   },
 });
 
