@@ -41,12 +41,31 @@ export type Obj = Record<string, unknown>;
 
 export type TicketListKind = "own" | "general" | "technician" | "projects";
 
+/** Filter body of PUT /api/v1/tickets (the "custom ticket list"). */
+export type CustomTicketFilter = {
+  companies?: number[];
+  includeDoneTickets?: boolean;
+  /** Unix seconds. */
+  modifiedWithinTimeframe?: { from: number; to: number };
+  itemsPerPage: number;
+  /** TANSS counts from 1. */
+  page: number;
+};
+
 export type TanssClient = {
   login(input: LoginInput): Promise<TanssSession>;
   ticketList(
     session: TanssSession,
     kind: TicketListKind,
   ): Promise<{ items: Obj[]; linked: LinkedEntities; waitingStates: number[] }>;
+  /**
+   * One page of tickets matching a filter, newest modification first; used to
+   * page through a customer's tickets, including done ones. `page` starts at 1.
+   */
+  customTicketList(
+    session: TanssSession,
+    filter: CustomTicketFilter,
+  ): Promise<{ items: Obj[]; linked: LinkedEntities }>;
   ticketById(
     session: TanssSession,
     ticketId: number,
@@ -326,6 +345,10 @@ export function createTanssClient(opts: {
         linked: envelope.meta?.linkedEntities ?? {},
         waitingStates,
       };
+    },
+    async customTicketList(session, filter) {
+      const envelope = await authed(session, "PUT", "/api/v1/tickets", filter);
+      return { items: asArray(envelope.content), linked: envelope.meta?.linkedEntities ?? {} };
     },
     async ticketById(session, ticketId) {
       const envelope = await authed(session, "GET", `/api/v1/tickets/${ticketId}`);
