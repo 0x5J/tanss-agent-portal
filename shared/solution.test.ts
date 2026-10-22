@@ -120,6 +120,53 @@ describe("rankCandidates", () => {
     ]);
     expect(ranked.map((c) => c.id)).toEqual([4, 3, 2, 1]);
   });
+  // Signature lines without a greeting before them: stripMailNoise keeps them, the qualify rule has to hold.
+  const bareSignature = (who: string) => `<p>${who} · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789 · Zentrale</p>`;
+  it("lets no candidate in through a signature in 70 % of the tickets", () => {
+    const sig = bareSignature("Max Mustermann");
+    const list = Array.from({ length: 40 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Bitte erledigen.</p>${i < 28 ? sig : ""}`,
+      modifiedTime: i,
+    }));
+    expect(rankCandidates({ title: "Drucker druckt nicht", description: `<p>Kein Ausdruck.</p>${sig}` }, list)).toEqual([]);
+  });
+  it("ranks a topic above a sender's signature when two senders share the list", () => {
+    const sigA = bareSignature("Max Mustermann");
+    const sigB = "<p>Erika Beispiel · Einkauf · Beispielweg 7 · 54321 Beispielstadt · Mobil 0987 654321 · Filiale</p>";
+    const list = Array.from({ length: 100 }, (_, i) => ({
+      id: 1 + i,
+      title: i < 30 ? "Backup Fehler" : i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Bitte erledigen.</p>${i % 2 ? sigA : sigB}`,
+      modifiedTime: i,
+    }));
+    const ranked = rankCandidates({ title: "Backup fehlgeschlagen", description: `<p>Die Nacht lief nicht durch.</p>${sigA}` }, list);
+    expect(ranked.map((c) => c.id).sort((a, b) => a - b)).toEqual(list.slice(0, 30).map((t) => t.id));
+  });
+  it("keeps body-only matches when the signature is in half the tickets", () => {
+    const sig = bareSignature("Max Mustermann");
+    const list = Array.from({ length: 100 }, (_, i) => ({
+      id: 1 + i,
+      title: i < 3 ? "Störung Lager" : i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: i < 3 ? `<p>Der Drucker im Lager druckt nur leere Seiten.</p>${sig}` : `<p>Bitte erledigen.</p>${i % 2 ? sig : ""}`,
+      modifiedTime: 1_000 - i,
+    }));
+    const ranked = rankCandidates({ title: "Drucker druckt nicht", description: `<p>Kein Ausdruck.</p>${sig}` }, list);
+    expect(ranked.map((c) => c.id)).toEqual([1, 2, 3]);
+  });
+  it("leaves greeting, signature and quoted mail of the subject out", () => {
+    const description =
+      "<p>Hallo,</p><p>der Drucker druckt nicht.</p><p>Mit freundlichen Grüßen<br>Max Mustermann<br>Lagerleitung</p>" +
+      "<p>Von: Erika Beispiel<br>Betreff: Etiketten</p><p>Die Etiketten fehlen.</p>";
+    const ids = rankCandidates({ title: "Störung", description }, [
+      { id: 1, title: "Drucker offline", modifiedTime: 1 },
+      { id: 2, title: "Lagerleitung Zugang", modifiedTime: 2 },
+      { id: 3, title: "Etiketten bestellen", modifiedTime: 3 },
+      { id: 4, title: "Mustermann Passwort", modifiedTime: 4 },
+    ]).map((c) => c.id);
+    expect(ids).toEqual([1]);
+  });
   it("matches across hyphens and inside longer words", () => {
     const ids = rankCandidates({ title: "Drucker offline", description: "" }, [
       { id: 1, title: "Netzwerk-Drucker", modifiedTime: 1 },

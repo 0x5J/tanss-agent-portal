@@ -1,4 +1,4 @@
-import { STOP_WORDS, parseSimilar, type SimilarHit } from "./agent.ts";
+import { STOP_WORDS, parseSimilar, stripMailNoise, type SimilarHit } from "./agent.ts";
 import type { TicketRow } from "./tickets.ts";
 
 /** How far back the done tickets of a customer are looked at. */
@@ -61,8 +61,29 @@ export function problemWords(text: string): string[] {
 const PART_MATCH_MIN = 5;
 /** Lists are weighed as if they had at least this many tickets, so tiny lists still score. */
 const IDF_MIN_LIST = 7;
-/** Candidates scoring below this drop out: half of one body hit of a word no other ticket has. */
-const SCORE_FLOOR = 0.5;
+/**
+ * A body hit qualifies a candidate only for a word with weight ≥ 0.5, i.e.
+ * df ≤ N^(1 − 0.5) = √N — checked on df, so rounding cannot tip it.
+ */
+const BODY_QUALIFY_WEIGHT = 0.5;
+
+/**
+ * A TANSS description as text that keeps its lines, so stripMailNoise can
+ * cut greeting, signature and quoted mails: block ends and <br> become line
+ * breaks, other tags a space.
+ */
+function plainLines(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\s*\/?>|<\/(p|div|li|tr|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n");
+}
 
 /** The words of a text, for exact lookup and for part matches. */
 function wordIndex(text: string): { set: Set<string>; joined: string } {
@@ -76,27 +97,32 @@ function hasWord(index: { set: Set<string>; joined: string }, word: string): boo
 }
 
 /**
- * Done tickets that share words with the subject, best first. Each subject
- * word has a weight: ln(N / df) / ln(N), with N the number of done tickets
- * (at least 7) and df the tickets it hits — 1 for a word only one ticket has,
- * 0 for a word every ticket has. A hit in the candidate's title scores
- * 3 × weight, otherwise a hit in the description or internal note 1 × weight;
- * a word counts once per candidate. Ties go to the newer ticket.
+ * Done tickets that share words with the subject, best first.
  *
- * Mail tickets of one customer share signatures, greetings, addresses and
- * phone numbers; the weight takes those words to (nearly) nothing, while a
- * recurring topic (many backup tickets) still counts. Candidates below
- * SCORE_FLOOR drop out, so a ticket that shares only boilerplate — or
- * nothing — with the subject is not handed to the model. Lists under 7
- * tickets are weighed as if they had 7: they are too small to tell
- * boilerplate from a topic, so every word keeps a weight there.
+ * Subject words come from the title and the description without greeting,
+ * signature and quoted mails (stripMailNoise). Each word has a weight
+ * ln(N / df) / ln(N), with N the number of done tickets (at least 7) and df
+ * the tickets it hits — 1 for a word only one ticket has, 0 for a word every
+ * ticket has.
+ *
+ * Qualifying and ranking are separate. A candidate qualifies only through a
+ * subject word with weight > 0 in its title, or one with weight ≥
+ * BODY_QUALIFY_WEIGHT (df ≤ √N) in its description or internal note. Mail
+ * signatures, greetings and addresses never sit in titles and are frequent
+ * in bodies, so they cannot qualify a ticket, however many of them add up —
+ * one customer's tickets from several senders keep each signature at a
+ * middling weight, which a score floor could not tell from a topic.
+ * Qualified candidates rank by the sum over all subject words: 3 × weight
+ * for a title hit, otherwise 1 × weight for a body hit, a word once per
+ * candidate. Ties go to the newer ticket. Lists under 7 tickets are weighed
+ * as if they had 7, so every word keeps a weight there.
  */
 export function rankCandidates(
   subject: { title: string; description: string },
   tickets: Record<string, unknown>[],
   limit: number = SOLUTION_MAX_CANDIDATES,
 ): SolutionCandidate[] {
-  const wanted = problemWords(`${subject.title} ${subject.description}`);
+  const wanted = problemWords(`${subject.title}\n${stripMailNoise(plainLines(subject.description))}`);
   if (wanted.length === 0) return [];
   const indexed = tickets
     .map((t) => ({
@@ -108,17 +134,26 @@ export function rankCandidates(
     .filter((c) => Number.isFinite(c.id));
 
   const n = Math.max(IDF_MIN_LIST, indexed.length);
-  const weights = new Map<string, number>();
+  const weights = new Map<string, { weight: number; rare: boolean }>();
   for (const w of wanted) {
     const df = indexed.filter((c) => hasWord(c.title, w) || hasWord(c.body, w)).length;
-    if (df > 0) weights.set(w, Math.log(n / df) / Math.log(n));
+    if (df > 0) weights.set(w, { weight: Math.log(n / df) / Math.log(n), rare: df <= n ** (1 - BODY_QUALIFY_WEIGHT) });
   }
 
   const ranked: SolutionCandidate[] = [];
   for (const { t, id, title, body } of indexed) {
     let score = 0;
-    for (const [w, weight] of weights) score += hasWord(title, w) ? 3 * weight : hasWord(body, w) ? weight : 0;
-    if (score < SCORE_FLOOR) continue;
+    let qualifies = false;
+    for (const [w, { weight, rare }] of weights) {
+      if (hasWord(title, w)) {
+        score += 3 * weight;
+        qualifies ||= weight > 0;
+      } else if (hasWord(body, w)) {
+        score += weight;
+        qualifies ||= rare;
+      }
+    }
+    if (!qualifies) continue;
     ranked.push({
       id,
       title: String(t.title ?? ""),
