@@ -30,7 +30,8 @@ type Check = Awaited<ReturnType<typeof api.agent.company>>;
  * agent's questions about a ticket — where it stands, what next, was there
  * something like it, is it filed under the right customer — and shows each
  * answer as one insight. Every change stays a click of the person; nothing
- * here writes by itself.
+ * here writes by itself. The drawer keys it by ticket, so a late answer
+ * never lands in another ticket's card.
  */
 export function TicketAgentActions(props: Props) {
   const [summary, setSummary] = useState<string | null>(null);
@@ -43,14 +44,6 @@ export function TicketAgentActions(props: Props) {
   const [checkBusy, setCheckBusy] = useState(false);
   const [solution, setSolution] = useState<SolutionAnswer | null>(null);
   const [solutionBusy, setSolutionBusy] = useState(false);
-
-  useEffect(() => {
-    setSummary(null);
-    setNext(null);
-    setSimilar(null);
-    setCheck(null);
-    setSolution(null);
-  }, [props.ticketId]);
 
   async function run<T>(busy: (b: boolean) => void, load: () => Promise<T>, done: (value: T) => void) {
     busy(true);
@@ -231,8 +224,9 @@ function Solution(props: {
   useEffect(() => setCopied(false), [solution]);
 
   if (solution.verdict !== "ok") {
+    const title = `Lösungsvorschlag${solution.truncated ? ` · ${solution.checked} erledigte geprüft · nicht alle geprüft` : ""}`;
     return (
-      <Insight tone="flat" title="Lösungsvorschlag" onClose={props.onClose}>
+      <Insight tone="flat" title={title} onClose={props.onClose}>
         {solution.text}
       </Insight>
     );

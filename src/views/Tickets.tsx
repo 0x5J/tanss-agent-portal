@@ -901,7 +901,7 @@ export function TicketsView(props: Props) {
       {selected.length ? (
         <div className="tk-selbar" role="toolbar" aria-label="Auswahl">
           <span className="count">{selected.length} ausgewählt</span>
-          <button className="tk-selbtn" disabled={busy} onClick={assignToMe} title="Mir zuweisen (A)">
+          <button className="tk-selbtn" disabled={busy} onClick={assignToMe} title="Mir zuweisen (a)">
             Mir zuweisen
           </button>
           <button className="tk-selbtn" disabled={busy} onClick={openAssignPick} title="Einem Techniker zuweisen (⇧A)">

@@ -196,6 +196,7 @@ export function TicketDrawer(props: Props) {
               <>
                 {ticket ? (
                   <TicketAgentActions
+                    key={ticketId}
                     ticketId={ticketId}
                     ready={props.agentReady}
                     entries={detail.thread.length}

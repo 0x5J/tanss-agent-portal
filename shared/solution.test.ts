@@ -31,6 +31,9 @@ describe("problemWords", () => {
   it("lower-cases and de-duplicates", () => {
     expect(problemWords("Backup BACKUP backup Fehler")).toEqual(["backup", "fehler"]);
   });
+  it("splits at hyphens", () => {
+    expect(problemWords("Drucker-Warteschlange hängt")).toEqual(["drucker", "warteschlange", "hängt"]);
+  });
   it("separates words at tags and entities", () => {
     expect(problemWords("<td>Drucker</td><td>Toner</td>&nbsp;leer")).toEqual(["drucker", "toner", "leer"]);
   });
@@ -67,6 +70,37 @@ describe("rankCandidates", () => {
     const [hit] = rankCandidates({ title: "Backup", description: "" }, [{ id: 6, title: "Backup" }]);
     expect(hit).toMatchObject({ id: 6, excerpt: "", modified: 0 });
   });
+  it("ignores mail boilerplate shared by many done tickets", () => {
+    const signature =
+      "<p>Mit freundlichen Grüßen</p><p>Max Mustermann · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789</p>";
+    const vpn = Array.from({ length: 40 }, (_, i) => ({
+      id: 100 + i,
+      title: "VPN Problem",
+      content: `<p>Hallo, das VPN verbindet sich nicht.</p>${signature}`,
+      modifiedTime: 1_000 + i,
+    }));
+    const printers = [
+      { id: 1, title: "Etikettendrucker Lager", content: `<p>Etiketten kommen leer heraus.</p>${signature}`, modifiedTime: 10 },
+      { id: 2, title: "Druckerwarteschlange hängt", content: `<p>Aufträge bleiben stehen.</p>${signature}`, modifiedTime: 20 },
+    ];
+    const ranked = rankCandidates(
+      { title: "Drucker druckt nicht", description: `<p>Hallo, der Drucker im Büro druckt nichts mehr.</p>${signature}` },
+      [...vpn, ...printers],
+    );
+    expect(ranked.slice(0, 2).map((c) => c.id)).toEqual([2, 1]);
+    expect(ranked.some((c) => c.id >= 100)).toBe(false);
+  });
+  it("matches across hyphens and inside longer words", () => {
+    const ids = rankCandidates({ title: "Drucker offline", description: "" }, [
+      { id: 1, title: "Netzwerk-Drucker", modifiedTime: 1 },
+      { id: 2, title: "Etikettendrucker Lager", modifiedTime: 2 },
+      { id: 3, title: "Druckt nicht", modifiedTime: 3 },
+    ]).map((c) => c.id);
+    expect(ids).toEqual([2, 1]);
+  });
+  it("matches short subject words only as whole words", () => {
+    expect(rankCandidates({ title: "Mail", description: "" }, [{ id: 1, title: "Mailbox voll" }])).toEqual([]);
+  });
   it("returns nothing when the subject has no usable word", () => {
     expect(rankCandidates({ title: "Ja", description: "" }, tickets)).toEqual([]);
   });
@@ -102,6 +136,11 @@ describe("solutionPickPrompt", () => {
     expect(prompt).toContain('{"similar":[');
     expect(prompt).toMatch(/höchstens 5/);
     expect(prompt).toContain("#4711");
+  });
+  it("passes the description as plain text", () => {
+    const prompt = solutionPickPrompt(row, "<p>Veeam&nbsp;Job <b>bricht</b> ab</p>", []);
+    expect(prompt).toContain("Veeam Job bricht ab");
+    expect(prompt).not.toContain("<p>");
   });
 });
 
