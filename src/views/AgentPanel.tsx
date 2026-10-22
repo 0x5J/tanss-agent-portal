@@ -4,6 +4,7 @@ import type { Activity } from "../../shared/activity.ts";
 import type { PatternGroup } from "../../shared/agent.ts";
 import type { TicketRow } from "../../shared/tickets.ts";
 import { AgentHint, Icon, SPARK_SMALL } from "../ui/kit.tsx";
+import { AgentText } from "../AgentText.tsx";
 
 type Props = {
   ready: boolean;
@@ -197,7 +198,9 @@ function BriefingBlock(props: {
         onRefresh={props.onRefresh}
         onClose={props.onClose}
       />
-      <div className="tk-answer-body">{linkIds(props.briefing.text, props.onOpen)}</div>
+      <div className="tk-answer-body">
+        <AgentText text={props.briefing.text} plain={(t) => linkIds(t, props.onOpen)} />
+      </div>
       <div className="tk-facts">
         {facts.map(([value, label, tone]) => (
           <span key={label} className="chip">

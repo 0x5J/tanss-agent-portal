@@ -8,6 +8,7 @@ import type { TicketRow } from "../../shared/tickets.ts";
 import { byUrgency, dueLabel, dueState, dueToday, firstName, greeting, ownOpen } from "../../shared/today.ts";
 import { nowUnix, todayYmd } from "../format.ts";
 import { Icon, SPARK } from "../ui/kit.tsx";
+import { AgentText } from "../AgentText.tsx";
 import type { View } from "../Shell.tsx";
 import "../styles/today.css";
 
@@ -170,7 +171,9 @@ export function TodayView(props: Props) {
           </span>
         </div>
         {briefing ? (
-          <p className="briefing-text">{linkIds(briefing.text, props.onOpen)}</p>
+          <div className="briefing-text">
+            <AgentText text={briefing.text} plain={(t) => linkIds(t, props.onOpen)} />
+          </div>
         ) : briefingBusy ? (
           <p className="briefing-text muted">
             <span className="dot xs pulse" /> Der Agent liest deine Tickets …

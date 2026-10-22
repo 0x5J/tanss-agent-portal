@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api.ts";
 import { copyToClipboard } from "./clipboard.ts";
+import { AgentText } from "./AgentText.tsx";
+import { plainAgentText } from "./markdown.ts";
 import type { ChatTurn } from "../shared/agent.ts";
 import type { Activity } from "../shared/activity.ts";
 import type { TicketRow } from "../shared/tickets.ts";
@@ -152,13 +154,13 @@ export function AgentSidebar(props: Props) {
             <div className="who">
               <span>{m.role === "user" ? "Du" : "Agent"}</span>
               {m.role === "assistant" && m.content ? (
-                <button className="btn ghost small" onClick={() => void copyAnswer(m.content, i)} title="Antwort kopieren">
+                <button className="btn ghost small" onClick={() => void copyAnswer(plainAgentText(m.content), i)} title="Antwort kopieren">
                   {copiedAt === i ? "kopiert ✓" : "kopieren"}
                 </button>
               ) : null}
             </div>
             <div className="bubble">
-              <div className="text">{m.role === "assistant" ? linkIds(m.content, props.onOpen) : m.content}</div>
+              <div className="text">{m.role === "assistant" ? <AgentText text={m.content} plain={(t) => linkIds(t, props.onOpen)} /> : m.content}</div>
               {m.source ? <div className="chat-source tiny muted">{linkIds(m.source, props.onOpen)}</div> : null}
             </div>
           </div>

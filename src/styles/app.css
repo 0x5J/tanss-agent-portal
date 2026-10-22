@@ -441,6 +441,17 @@ button.search:hover { background: var(--soft2); }
 .chat-msg.user .bubble { background: var(--primary); color: var(--on-primary); }
 .chat-msg.assistant .bubble { background: var(--soft); color: var(--ink); }
 .chat-msg .text { white-space: pre-line; }
+
+/* Agent answers with their Markdown drawn (src/AgentText.tsx). */
+.agent-text { white-space: normal; }
+.agent-text > * { margin: 0; }
+.agent-text > * + * { margin-top: 8px; }
+.agent-text ul, .agent-text ol { padding-left: 20px; }
+.agent-text li + li { margin-top: 2px; }
+.agent-text-h { font-weight: 600; color: var(--ink); }
+.agent-text strong, .agent-text-inline strong { font-weight: 600; color: var(--ink); }
+.agent-text code, .agent-text-inline code { font-family: ui-monospace, monospace; font-size: 0.9em; background: rgba(127, 127, 127, 0.15); border-radius: 4px; padding: 0 4px; }
+.td-insight-body .agent-text { margin-top: 4px; }
 .chat-msg .chat-source { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 @media (max-width: 1180px) { .agent-sidebar { width: 320px; } }
 
