@@ -4,6 +4,8 @@ import { TanssError, type TanssClient } from "./tanss.ts";
 import { LlmError, type LlmClient } from "./llm.ts";
 import { createMemoryStore } from "./store.ts";
 import { maskKey } from "./agent.ts";
+import { threadBudget } from "../shared/agent.ts";
+import { solutionPrompt } from "../shared/solution.ts";
 
 const SECRET = "x".repeat(32);
 const SESSION = { employeeId: 7, apiKey: "Bearer a", refresh: "Bearer r", expire: 9_999_999_999 };
@@ -733,9 +735,13 @@ describe("solution", () => {
   async function setupSolution(opts: {
     llm?: string | ((p: string) => string);
     subject?: Record<string, unknown>;
-    withDone?: Record<string, unknown>[];
+    /** The list with done tickets, or one page of it. */
+    withDone?: Record<string, unknown>[] | ((page: number) => Record<string, unknown>[]);
     open?: Record<string, unknown>[];
     tickets?: Record<number, Record<string, unknown>>;
+    /** Comments of a ticket's history; ticket 20 has one about the full datastore by default. */
+    comments?: Record<number, Record<string, unknown>[]>;
+    contextTokens?: number;
     tanss?: Partial<TanssClient>;
   }) {
     const filters: Record<string, unknown>[] = [];
@@ -748,7 +754,8 @@ describe("solution", () => {
     const env = await setup(opts.llm ?? answers(PICK), true, {
       customTicketList: async (_s, filter) => {
         filters.push(filter as Record<string, unknown>);
-        return { items: filter.includeDoneTickets ? withDone : open, linked: {} };
+        const done = typeof withDone === "function" ? withDone(filter.page ?? 1) : withDone;
+        return { items: filter.includeDoneTickets ? done : open, linked: {} };
       },
       ticketById: async (_s, id) => {
         byId.push(id);
@@ -757,11 +764,12 @@ describe("solution", () => {
       },
       ticketHistory: async (_s, id) => {
         histories.push(id);
-        const comments = id === 20 ? [{ id: 8, date: nowS - 11 * DAY, employeeId: 7, content: "Datastore voll, alte Sicherungen gelöscht", internal: true }] : [];
-        return { content: { comments, supports: [], mails: [] }, linked: {} };
+        const fallback = id === 20 ? [{ id: 8, date: nowS - 11 * DAY, employeeId: 7, content: "Datastore voll, alte Sicherungen gelöscht", internal: true }] : [];
+        return { content: { comments: opts.comments?.[id] ?? fallback, supports: [], mails: [] }, linked: {} };
       },
       ...opts.tanss,
     });
+    if (opts.contextTokens) env.store.setLlm({ baseUrl: "http://good:1234/v1", apiKey: "", model: "qwen3", contextTokens: opts.contextTokens });
     return { ...env, filters, byId, histories };
   }
 
@@ -834,6 +842,68 @@ describe("solution", () => {
     });
     await call("POST", "/me/agent/solution", { ticketId: 1 });
     expect(prompts[1]).toContain("Aufbewahrung auf 14 Tage");
+  });
+
+  it("keeps subject, sources and internal notes within one thread budget", async () => {
+    const contextTokens = 4096;
+    const budget = threadBudget(contextTokens);
+    // One source: the subject gets a third, the source two thirds, its note at most a quarter of that.
+    const noteChars = Math.min(2_000, Math.floor(Math.floor((budget * 2) / 3) / 4));
+    const long = (id: number) =>
+      Array.from({ length: 40 }, (_, i) => ({ id: id * 100 + i, date: nowS - (50 - i) * DAY, employeeId: 7, content: `Eintrag ${i} ${"x".repeat(400)}`, internal: true }));
+    const { call, prompts } = await setupSolution({
+      contextTokens,
+      tickets: { 20: { ...BACKUP, internalContent: "abcdefghij".repeat(1_000) } },
+      comments: { 1: long(1), 20: long(20) },
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json().verdict).toBe("ok");
+    const note = prompts[1].split("Interne Notiz am Ticket:\n")[1];
+    expect(note).toHaveLength(noteChars);
+    const instructions = solutionPrompt("", [{ ticketId: 20, context: "", internalNote: "x" }]).length;
+    // A little slack for the line breaks and the "entries left out" line ticketContext adds.
+    expect(prompts[1].length).toBeLessThanOrEqual(budget + instructions + 200);
+    expect(prompts[1]).toContain("ältere Einträge ausgelassen");
+  });
+
+  it("lets an expired session through instead of calling the source unreadable", async () => {
+    const { call, prompts } = await setupSolution({
+      tanss: {
+        ticketById: async (_s, id) => {
+          if (id === 20) throw new TanssError("Sitzung abgelaufen", 401);
+          return { item: SUBJECT, linked: { companies: { "5": { name: "Kunde" } } } };
+        },
+      },
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "Sitzung abgelaufen" });
+    expect(prompts).toHaveLength(1);
+  });
+
+  it("passes a 401 from the done list through unchanged", async () => {
+    const { call, prompts } = await setupSolution({
+      tanss: {
+        customTicketList: async () => {
+          throw new TanssError("Sitzung abgelaufen", 401);
+        },
+      },
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "Sitzung abgelaufen" });
+    expect(prompts).toEqual([]);
+  });
+
+  it("says when not all done tickets were checked", async () => {
+    // Every page full: the list stops after five pages and reports it.
+    const filler = (page: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: page * 1_000 + i, title: "Drucker", content: "", modifiedTime: nowS - 30 * DAY }));
+    const { call } = await setupSolution({
+      withDone: (page) => (page === 1 ? [SUBJECT, BACKUP, PRINTER, ...filler(1, 97)] : filler(page, 100)),
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json()).toMatchObject({ verdict: "ok", truncated: true, checked: 499 });
   });
 
   it("answers 502-like errors from TANSS as an error", async () => {

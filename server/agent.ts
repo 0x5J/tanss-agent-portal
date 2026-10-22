@@ -249,9 +249,9 @@ const similarSchema = rowsSchema.extend({ ticketId: z.number().int().positive() 
 const SIMILAR_MAX_CANDIDATES = 60;
 /** Companies the customer check offers the model to choose from. */
 const COMPANY_MAX_CANDIDATES = 10;
-/** Share of the thread budget for the ticket a solution is wanted for; the sources share one full budget. */
+/** Share of the thread budget for the ticket a solution is wanted for; the sources split the rest. */
 const SOLUTION_SUBJECT_SHARE = 1 / 3;
-/** Characters of a source ticket's internal note that go into the proposal prompt. */
+/** Most characters of a source ticket's internal note in the proposal prompt (and never more than a quarter of its share). */
 const SOLUTION_NOTE_CHARS = 2_000;
 
 const issueTextSchema = z.object({
@@ -752,18 +752,29 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
       );
       if (picked.length === 0) return empty("no-match", counts);
 
-      const settled = await Promise.allSettled(picked.map((hit) => loadTicket(session, hit.ticketId, 1 / picked.length)));
+      // Subject and sources together stay within one thread budget; each
+      // source's internal note is part of that source's share.
+      const sourceShare = (1 - SOLUTION_SUBJECT_SHARE) / picked.length;
+      const sourceChars = Math.floor(threadBudget(settings().contextTokens) * sourceShare);
+      const noteChars = Math.min(SOLUTION_NOTE_CHARS, Math.floor(sourceChars / 4));
+      const settled = await Promise.allSettled(picked.map((hit) => loadTicket(session, hit.ticketId, sourceShare)));
+      // An expired session is not "unreadable": let withSession heal it.
+      const expired = settled.find(
+        (r): r is PromiseRejectedResult => r.status === "rejected" && r.reason instanceof TanssError && r.reason.status === 401,
+      );
+      if (expired) throw expired.reason;
       const sources: SolutionSource[] = [];
       const read: { ticketId: number; context: string; internalNote: string }[] = [];
       settled.forEach((result, i) => {
         if (result.status !== "fulfilled") return;
         const hit = picked[i];
         const candidate = candidates.find((c) => c.id === hit.ticketId)!;
+        const internalNote = plainText(result.value.internalNote).slice(0, noteChars);
         sources.push({ ticketId: hit.ticketId, title: candidate.title, modified: candidate.modified, reason: hit.reason });
         read.push({
           ticketId: hit.ticketId,
-          context: result.value.context,
-          internalNote: plainText(result.value.internalNote).slice(0, SOLUTION_NOTE_CHARS),
+          context: ticketContext(result.value.row, result.value.thread, sourceChars - internalNote.length),
+          internalNote,
         });
       });
       if (read.length === 0) return empty("unreadable", counts);

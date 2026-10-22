@@ -205,7 +205,9 @@ export function TicketDrawer(props: Props) {
                     onSetCompany={(companyId, name) => void patch({ companyId }, `Kunde → ${name}`)}
                     onOpen={props.onOpen}
                     onDraft={(draft) => {
+                      // A solution is a plain note, never saved under a mail-draft title.
                       setInternal(true);
+                      setTitle("");
                       setText(draft);
                       document.getElementById("drawer-reply")?.scrollIntoView({ block: "end", behavior: "smooth" });
                     }}
