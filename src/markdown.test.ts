@@ -59,6 +59,15 @@ describe("parseBlocks", () => {
     ]);
   });
 
+  it("drops fence lines but keeps the code they hold", () => {
+    expect(parseBlocks("Befehl:\n```powershell\nRestart-Service Spooler\n```\n```ipconfig /flushdns```\n```net stop spooler")).toEqual([
+      { kind: "p", lines: ["Befehl:"] },
+      { kind: "p", lines: ["Restart-Service Spooler"] },
+      { kind: "p", lines: ["`ipconfig /flushdns`", "net stop spooler"] },
+    ]);
+    expect(plainAgentText("```ipconfig /flushdns```")).toBe("ipconfig /flushdns");
+  });
+
   it("keeps the numbering when items are split by blank lines", () => {
     expect(parseBlocks("1. eins\n\n2. zwei")).toEqual([
       { kind: "ol", start: 1, items: ["eins"] },

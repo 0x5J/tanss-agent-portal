@@ -17,7 +17,11 @@ const HEADING = /^#{1,6}\s+(.*?)\s*#*\s*$/;
 const BULLET = /^\s*[-*+•]\s+(.*)$/;
 const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
-const FENCE = /^\s*```/;
+// "```" alone or with a language tag opens or closes a code block and is
+// dropped; the lines between stay as text. "```cmd```" on one line is code.
+const FENCE = /^\s*```\s*[\w+#.-]*\s*$/;
+const ONE_LINE_FENCE = /^\s*```(.*?)```\s*$/;
+const FENCE_START = /^\s*```/;
 
 export function parseBlocks(text: string): Block[] {
   const blocks: Block[] = [];
@@ -28,7 +32,10 @@ export function parseBlocks(text: string): Block[] {
   };
 
   for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
-    const line = raw.trimEnd();
+    let line = raw.trimEnd();
+    const oneLine = ONE_LINE_FENCE.exec(line);
+    if (oneLine?.[1].trim()) line = `\`${oneLine[1].trim()}\``;
+    else if (!FENCE.test(line)) line = line.replace(FENCE_START, "");
     if (!line.trim() || RULE.test(line) || FENCE.test(line)) {
       close();
       continue;
