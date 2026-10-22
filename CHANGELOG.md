@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+## [0.5.3] – 2026-10-22
+
 ### Behoben
 
 - Antworten des Agenten (Lösungsvorschlag, Stand der Dinge, nächster Schritt,
@@ -219,7 +221,8 @@ Erste öffentliche Version.
 - Der gespeicherte LLM-API-Key geht nur noch an den gespeicherten Endpoint.
 - Abmelden macht alle Cookies des Kontos serverseitig ungültig, auch Kopien.
 
-[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.2...HEAD
+[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/0x5J/tanss-agent-portal/compare/v0.4.4...v0.5.0
