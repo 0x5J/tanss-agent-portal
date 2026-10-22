@@ -103,6 +103,8 @@ export function TicketsView(props: Props) {
   const [anchor, setAnchor] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusPick, setStatusPick] = useState(false);
+  const [assignPick, setAssignPick] = useState(false);
+  const [assignSearch, setAssignSearch] = useState("");
   const [duePick, setDuePick] = useState(false);
   const [dueDay, setDueDay] = useState("");
   // "Due on X" means "by the end of business" — the field says so and stays editable.
@@ -398,6 +400,18 @@ export function TicketsView(props: Props) {
     await apply(targets, { assignedToEmployeeId: employeeId }, `Zugewiesen an mich`);
   }
 
+  function openAssignPick() {
+    if (!targets.length) return;
+    setAssignSearch("");
+    setAssignPick(true);
+  }
+
+  async function assignTo(technician: { id: number; name: string }) {
+    setAssignPick(false);
+    if (!targets.length) return;
+    await apply(targets, { assignedToEmployeeId: technician.id }, `Zugewiesen an ${technician.name}`);
+  }
+
   async function setStatus(statusId: number) {
     setStatusPick(false);
     if (!targets.length) return;
@@ -480,12 +494,13 @@ export function TicketsView(props: Props) {
       const tag = (event.target as HTMLElement | null)?.tagName?.toLowerCase() ?? "";
       if (tag === "input" || tag === "textarea" || tag === "select") return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (saveName !== null || openFilter || commentOpen || statusPick || duePick) {
+      if (saveName !== null || openFilter || commentOpen || statusPick || assignPick || duePick) {
         if (event.key === "Escape") {
           setSaveName(null);
           setOpenFilter(null);
           setCommentOpen(false);
           setStatusPick(false);
+          setAssignPick(false);
           setDuePick(false);
         }
         return;
@@ -500,6 +515,9 @@ export function TicketsView(props: Props) {
       } else if (event.key === "Enter" && visible[focus]) {
         event.preventDefault();
         onOpen(visible[focus].id);
+      } else if (key === "a" && event.shiftKey) {
+        event.preventDefault();
+        openAssignPick();
       } else if (key === "a") {
         event.preventDefault();
         void assignToMe();
@@ -520,7 +538,10 @@ export function TicketsView(props: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, visible, focus, selected.length, anchor, employeeId, saveName, openFilter, commentOpen, statusPick, duePick]);
+  }, [active, visible, focus, selected.length, anchor, employeeId, saveName, openFilter, commentOpen, statusPick, assignPick, duePick]);
+
+  const assignNeedle = assignSearch.trim().toLowerCase();
+  const assignHits = (props.meta?.technicians ?? []).filter((t) => t.name.toLowerCase().includes(assignNeedle));
 
   const allSelected = visible.length > 0 && visible.every((row) => selected.includes(row.id));
   const shown = COLUMNS.filter((c) => c.id === "title" || columns.includes(c.id));
@@ -873,7 +894,7 @@ export function TicketsView(props: Props) {
           );
         })}
         <div className="tk-keys tiny muted">
-          j/k Fokus · x wählen (Shift: Bereich) · ⏎ öffnen · a mir zuweisen · s Status · f Fällig · c Kommentar · Esc Auswahl aufheben
+          j/k Fokus · x wählen (Shift: Bereich) · ⏎ öffnen · a mir zuweisen · ⇧A zuweisen an … · s Status · f Fällig · c Kommentar · Esc Auswahl aufheben
         </div>
       </div>
 
@@ -882,6 +903,9 @@ export function TicketsView(props: Props) {
           <span className="count">{selected.length} ausgewählt</span>
           <button className="tk-selbtn" disabled={busy} onClick={assignToMe} title="Mir zuweisen (A)">
             Mir zuweisen
+          </button>
+          <button className="tk-selbtn" disabled={busy} onClick={openAssignPick} title="Einem Techniker zuweisen (⇧A)">
+            Zuweisen an …
           </button>
           <button className="tk-selbtn" disabled={busy} onClick={() => setStatusPick(true)} title="Status ändern (S)">
             Status ändern
@@ -1069,6 +1093,46 @@ export function TicketsView(props: Props) {
               ))
             ) : (
               <div className="palette-group">Statusliste nicht verfügbar (Recht fehlt?)</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {assignPick ? (
+        <div className="palette-backdrop" onClick={() => setAssignPick(false)}>
+          <div className="palette" onClick={(e) => e.stopPropagation()} style={{ width: "min(420px, 92vw)" }}>
+            <div className="palette-input">
+              <span className="small">
+                Zuweisen: {targets.length} Ticket{targets.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {props.meta?.technicians.length ? (
+              <>
+                <div className="palette-input">
+                  <input
+                    autoFocus
+                    value={assignSearch}
+                    placeholder="Techniker suchen"
+                    onChange={(e) => setAssignSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setAssignPick(false);
+                      } else if (e.key === "Enter" && assignHits[0]) {
+                        e.preventDefault();
+                        void assignTo(assignHits[0]);
+                      }
+                    }}
+                  />
+                </div>
+                {assignHits.map((technician) => (
+                  <button key={technician.id} className="palette-item" onClick={() => void assignTo(technician)}>
+                    <span>{technician.name}</span>
+                  </button>
+                ))}
+              </>
+            ) : (
+              <div className="palette-group">Technikerliste nicht verfügbar (Recht fehlt?)</div>
             )}
           </div>
         </div>

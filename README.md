@@ -355,7 +355,7 @@ selbst nach TANSS: Entwürfe landen im Textfeld, Buchungen machst du selbst.
 Im Container ist das Host-LLM als `http://host.docker.internal:<port>` erreichbar.
 
 Tasten: `g h/d/t/z/w/i/l/s` Ansicht, `g a` Agent-Sidebar, `/` Suche, `⌘K` Befehle, `j/k` Fokus, `x` wählen (`X` bis zur
-zuletzt gewählten Zeile, wie ⇧-Klick in der Liste), `⏎` öffnen, `a` mir zuweisen, `s` Status,
+zuletzt gewählten Zeile, wie ⇧-Klick in der Liste), `⏎` öffnen, `a` mir zuweisen, `A` (Umschalt) zuweisen an …, `s` Status,
 `f` Fälligkeit, `c` Kommentar in Auswahl, `Esc` schließen.
 
 **Auswertung.** Eigene Ansicht über die gebuchten Zeiten eines frei wählbaren
