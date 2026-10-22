@@ -32,7 +32,7 @@ export const SOLUTION_MESSAGES: Record<Exclude<SolutionAnswer["verdict"], "ok">,
 const EXCERPT_CHARS = 200;
 
 /** Text of a TANSS field with tags and the common entities gone; tags separate words. */
-function plain(html: unknown): string {
+export function plainText(html: unknown): string {
   return String(html ?? "")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
@@ -46,7 +46,7 @@ function plain(html: unknown): string {
 
 /** Distinct lower-case words of a text that say something about a problem, in order of first use. */
 export function problemWords(text: string): string[] {
-  const words = plain(text)
+  const words = plainText(text)
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .split(/\s+/)
     .map((w) => w.toLowerCase())
@@ -73,11 +73,11 @@ export function rankCandidates(
     if (!Number.isFinite(id)) continue;
     const title = String(t.title ?? "");
     const inTitle = new Set(problemWords(title));
-    const inBody = new Set(problemWords(`${plain(t.content)} ${plain(t.internalContent)}`));
+    const inBody = new Set(problemWords(`${plainText(t.content)} ${plainText(t.internalContent)}`));
     let score = 0;
     for (const w of wanted) score += inTitle.has(w) ? 3 : inBody.has(w) ? 1 : 0;
     if (score === 0) continue;
-    ranked.push({ id, title, excerpt: plain(t.content).slice(0, EXCERPT_CHARS), modified: Number(t.modifiedTime) || 0, score });
+    ranked.push({ id, title, excerpt: plainText(t.content).slice(0, EXCERPT_CHARS), modified: Number(t.modifiedTime) || 0, score });
   }
   ranked.sort((a, b) => b.score - a.score || b.modified - a.modified);
   return ranked.slice(0, limit);

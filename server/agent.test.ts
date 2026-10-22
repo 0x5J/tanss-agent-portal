@@ -715,3 +715,138 @@ describe("customer check", () => {
     expect(prompts).toHaveLength(1);
   });
 });
+
+describe("solution", () => {
+  const DAY = 86_400;
+  const nowS = Math.floor(NOW / 1000);
+  const SUBJECT = { id: 1, title: "Backup DC01", content: "Job bricht ab", statusId: 2, companyId: 5, modifiedTime: nowS - 60 };
+  const BACKUP = { id: 20, title: "Backup DC01 Fehler", content: "Sicherung bricht ab", statusId: 9, companyId: 5, modifiedTime: nowS - 10 * DAY };
+  const PRINTER = { id: 21, title: "Drucker", content: "Papierstau", statusId: 9, companyId: 5, modifiedTime: nowS - 20 * DAY };
+  const OPEN = { id: 30, title: "Backup Server", content: "neu", statusId: 2, companyId: 5, modifiedTime: nowS - 2 * DAY };
+  const PICK = '{"similar":[{"ticketId":20,"reason":"gleicher Job"},{"ticketId":1,"reason":"selbst"},{"ticketId":30,"reason":"offen"}]}';
+
+  /** An LLM that answers the pick prompt with `pick` and the proposal prompt with a fixed text. */
+  const answers = (pick: string) => (p: string) =>
+    p.includes("Welche der erledigten Tickets") ? pick : p.includes("Schlage vor, wie") ? "Damals: Speicher voll." : "?";
+
+  /** A customer whose list holds `withDone` with the switch and `open` without it; tickets load per id. */
+  async function setupSolution(opts: {
+    llm?: string | ((p: string) => string);
+    subject?: Record<string, unknown>;
+    withDone?: Record<string, unknown>[];
+    open?: Record<string, unknown>[];
+    tickets?: Record<number, Record<string, unknown>>;
+    tanss?: Partial<TanssClient>;
+  }) {
+    const filters: Record<string, unknown>[] = [];
+    const byId: number[] = [];
+    const histories: number[] = [];
+    const subject = opts.subject ?? SUBJECT;
+    const withDone = opts.withDone ?? [subject, BACKUP, PRINTER, OPEN];
+    const open = opts.open ?? [subject, OPEN];
+    const tickets: Record<number, Record<string, unknown>> = { 1: subject, 20: BACKUP, 21: PRINTER, 30: OPEN, ...opts.tickets };
+    const env = await setup(opts.llm ?? answers(PICK), true, {
+      customTicketList: async (_s, filter) => {
+        filters.push(filter as Record<string, unknown>);
+        return { items: filter.includeDoneTickets ? withDone : open, linked: {} };
+      },
+      ticketById: async (_s, id) => {
+        byId.push(id);
+        if (!tickets[id]) throw new TanssError("nicht gefunden", 404);
+        return { item: tickets[id], linked: { companies: { "5": { name: "Kunde" } } } };
+      },
+      ticketHistory: async (_s, id) => {
+        histories.push(id);
+        const comments = id === 20 ? [{ id: 8, date: nowS - 11 * DAY, employeeId: 7, content: "Datastore voll, alte Sicherungen gelöscht", internal: true }] : [];
+        return { content: { comments, supports: [], mails: [] }, linked: {} };
+      },
+      ...opts.tanss,
+    });
+    return { ...env, filters, byId, histories };
+  }
+
+  it("suggests a solution from done tickets of the same customer", async () => {
+    const { call, prompts, filters, byId, histories } = await setupSolution({});
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      verdict: "ok",
+      text: "Damals: Speicher voll.",
+      sources: [{ ticketId: 20, title: "Backup DC01 Fehler", reason: "gleicher Job", modified: BACKUP.modifiedTime }],
+      read: 1,
+      checked: 2,
+      truncated: false,
+    });
+    expect(byId).toContain(20);
+    expect(histories).toContain(20);
+    for (const id of [21, 30]) {
+      expect(byId).not.toContain(id);
+      expect(histories).not.toContain(id);
+    }
+    expect(filters.length).toBeGreaterThan(0);
+    for (const f of filters) expect(f.companies).toEqual([5]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("#20");
+    expect(prompts[0]).not.toContain("#21");
+    expect(prompts[1]).toContain("Datastore voll");
+  });
+
+  it("says so when the ticket has no customer", async () => {
+    const { call, prompts, filters } = await setupSolution({ subject: { ...SUBJECT, companyId: 0 } });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json()).toMatchObject({ verdict: "no-company", sources: [], read: 0 });
+    expect(res.json().text).toContain("keinen Kunden");
+    expect(filters).toEqual([]);
+    expect(prompts).toEqual([]);
+  });
+
+  it("says so when there are no done tickets", async () => {
+    const { call, prompts } = await setupSolution({ withDone: [SUBJECT, OPEN], open: [SUBJECT, OPEN] });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json()).toMatchObject({ verdict: "no-done", sources: [], checked: 0, read: 0 });
+    expect(prompts).toEqual([]);
+  });
+
+  it("says so when nothing matches", async () => {
+    const none = await setupSolution({ withDone: [SUBJECT, PRINTER], open: [SUBJECT] });
+    const res = await none.call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json()).toMatchObject({ verdict: "no-match", sources: [], checked: 1, read: 0 });
+    expect(none.prompts).toEqual([]);
+
+    const empty = await setupSolution({ llm: answers('{"similar":[]}') });
+    const picked = await empty.call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(picked.json()).toMatchObject({ verdict: "no-match", sources: [], checked: 2, read: 0 });
+    expect(empty.prompts).toHaveLength(1);
+  });
+
+  it("skips a source that cannot be read", async () => {
+    const { call, prompts } = await setupSolution({
+      tickets: { 20: undefined as unknown as Record<string, unknown> },
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.json()).toMatchObject({ verdict: "unreadable", sources: [], read: 0 });
+    expect(prompts).toHaveLength(1);
+  });
+
+  it("puts the internal note of a source into the prompt", async () => {
+    const { call, prompts } = await setupSolution({
+      tickets: { 20: { ...BACKUP, internalContent: "<p>Aufbewahrung auf 14 Tage</p>" } },
+    });
+    await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(prompts[1]).toContain("Aufbewahrung auf 14 Tage");
+  });
+
+  it("answers 502-like errors from TANSS as an error", async () => {
+    const { call, prompts } = await setupSolution({
+      tanss: {
+        customTicketList: async () => {
+          throw new TanssError("kaputt", 502);
+        },
+      },
+    });
+    const res = await call("POST", "/me/agent/solution", { ticketId: 1 });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toEqual({ error: "Erledigte Tickets konnten nicht geladen werden: kaputt" });
+    expect(prompts).toEqual([]);
+  });
+});

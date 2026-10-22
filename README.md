@@ -343,6 +343,7 @@ selbst nach TANSS: Entwürfe landen im Textfeld, Buchungen machst du selbst.
 | Kürzen | Drawer, an langen Mails | Kurzfassung der Mail ohne Zitate, Signatur, Disclaimer; „Original" schaltet zurück |
 | Nächster Schritt | Drawer, Eigenschaften | ein Satz + wer am Zug ist; schlägt ggf. einen Status aus der TANSS-Statusliste vor — der Wechsel ist ein Klick |
 | Ähnliche Tickets | Drawer, Eigenschaften | Kandidaten aus `PUT search` (Titelbegriffe) und dem Board (max. 60); das Modell wählt mit Begründung |
+| Lösung vorschlagen | Drawer, Eigenschaften | erledigte Tickets desselben Kunden der letzten 12 Monate; das Portal wählt bis zu 30 nach gemeinsamen Wörtern, das Modell bis zu 5, deren Verlauf samt interner Notiz es liest; nichts davon wird gespeichert außer 10 Minuten im Arbeitsspeicher |
 | Kunde prüfen | Drawer, Eigenschaften | Titel, Beschreibung und die erste eingehende Mail (mit Absenderadresse). Nennt der Text eine andere Firma als die zugewiesene, sucht der Server sie in TANSS (`PUT search`) und das Modell wählt den Kunden aus den Treffern. Der Wechsel ist ein Klick; der Ansprechpartner bleibt stehen und ist in TANSS nachzuziehen |
 | Aus dem Verlauf entwerfen | Buchen (Drawer-Zeiten und Zeiten-Ansicht, wenn ein Ticket gewählt ist) | Tätigkeitstext aus den letzten Kommentaren, Mails und Leistungen; folgt den eigenen Stilregeln |
 | Aus Issue formulieren | Tagesimport, je Zeile | die eigenen Linear-Notizen des Tages, in einen Leistungstext im eigenen Stil gebracht |

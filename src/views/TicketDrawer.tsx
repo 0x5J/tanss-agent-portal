@@ -204,6 +204,11 @@ export function TicketDrawer(props: Props) {
                     onSetStatus={(statusId, name) => void patch({ statusId }, `Status → ${name}`)}
                     onSetCompany={(companyId, name) => void patch({ companyId }, `Kunde → ${name}`)}
                     onOpen={props.onOpen}
+                    onDraft={(draft) => {
+                      setInternal(true);
+                      setText(draft);
+                      document.getElementById("drawer-reply")?.scrollIntoView({ block: "end", behavior: "smooth" });
+                    }}
                     onError={onError}
                   />
                 ) : null}

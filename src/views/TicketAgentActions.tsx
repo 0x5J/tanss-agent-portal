@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api.ts";
 import type { TicketRow } from "../../shared/tickets.ts";
+import type { SolutionAnswer } from "../../shared/solution.ts";
+import { fullDate } from "../format.ts";
+import { copyToClipboard } from "../clipboard.ts";
 import { Dot, Icon, SPARK_SMALL } from "../ui/kit.tsx";
 
 type Props = {
@@ -13,6 +16,8 @@ type Props = {
   onSetStatus: (statusId: number, name: string) => void;
   onSetCompany: (companyId: number, name: string) => void;
   onOpen: (id: number) => void;
+  /** Puts a text into the drawer's note field as an internal note; nothing is saved. */
+  onDraft: (text: string) => void;
   onError: (error: unknown) => void;
 };
 
@@ -36,12 +41,15 @@ export function TicketAgentActions(props: Props) {
   const [similarBusy, setSimilarBusy] = useState(false);
   const [check, setCheck] = useState<Check | null>(null);
   const [checkBusy, setCheckBusy] = useState(false);
+  const [solution, setSolution] = useState<SolutionAnswer | null>(null);
+  const [solutionBusy, setSolutionBusy] = useState(false);
 
   useEffect(() => {
     setSummary(null);
     setNext(null);
     setSimilar(null);
     setCheck(null);
+    setSolution(null);
   }, [props.ticketId]);
 
   async function run<T>(busy: (b: boolean) => void, load: () => Promise<T>, done: (value: T) => void) {
@@ -56,7 +64,7 @@ export function TicketAgentActions(props: Props) {
   }
 
   const hint = props.ready ? undefined : "KI nicht eingerichtet (Einstellungen)";
-  const asked = summary !== null || next !== null || similar !== null || check !== null;
+  const asked = summary !== null || next !== null || similar !== null || check !== null || solution !== null;
 
   return (
     <div className="td-agent">
@@ -122,6 +130,10 @@ export function TicketAgentActions(props: Props) {
             </Insight>
           ) : null}
 
+          {solution ? (
+            <Solution solution={solution} onClose={() => setSolution(null)} onOpen={props.onOpen} onDraft={props.onDraft} onError={props.onError} />
+          ) : null}
+
           {check ? <CompanyCheck check={check} onClose={() => setCheck(null)} onSetCompany={props.onSetCompany} /> : null}
         </div>
       ) : (
@@ -160,6 +172,14 @@ export function TicketAgentActions(props: Props) {
         </button>
         <button
           className="btn"
+          disabled={!props.ready || solutionBusy}
+          title={hint ?? "Wie wurde das bei diesem Kunden schon gelöst?"}
+          onClick={() => void run(setSolutionBusy, () => api.agent.solution(props.ticketId), setSolution)}
+        >
+          {solutionBusy ? <Busy>sucht …</Busy> : "Lösung vorschlagen"}
+        </button>
+        <button
+          className="btn"
           disabled={!props.ready || checkBusy}
           title={hint ?? "Passt der Kunde zu dem, was im Ticket steht?"}
           onClick={() => void run(setCheckBusy, () => api.agent.company(props.ticketId), setCheck)}
@@ -191,6 +211,67 @@ function Insight(props: { tone: "ink" | "flat" | "ok" | "warn"; title: string; o
         ×
       </button>
     </div>
+  );
+}
+
+/**
+ * The proposal drawn from done tickets of the same customer, with the tickets
+ * it rests on. "Ins Notizfeld" only fills the drawer's text field; saving
+ * stays the person's click.
+ */
+function Solution(props: {
+  solution: SolutionAnswer;
+  onClose: () => void;
+  onOpen: (id: number) => void;
+  onDraft: (text: string) => void;
+  onError: (error: unknown) => void;
+}) {
+  const { solution } = props;
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setCopied(false), [solution]);
+
+  if (solution.verdict !== "ok") {
+    return (
+      <Insight tone="flat" title="Lösungsvorschlag" onClose={props.onClose}>
+        {solution.text}
+      </Insight>
+    );
+  }
+  async function copy() {
+    if (await copyToClipboard(solution.text)) setCopied(true);
+    else props.onError(new Error("Kopieren war nicht möglich — bitte den Text markieren und selbst kopieren."));
+  }
+  const title =
+    `Lösungsvorschlag · ${solution.checked} erledigte geprüft · ${solution.read} gelesen` +
+    (solution.truncated ? " · nicht alle geprüft" : "");
+  return (
+    <Insight tone="ink" title={title} onClose={props.onClose}>
+      <span className="pre">{solution.text}</span>
+      <div className="td-hits">
+        {solution.sources.map((source) => (
+          <div key={source.ticketId} className="td-hit">
+            <div className="row" style={{ gap: 8 }}>
+              <button className="linkish mono" onClick={() => props.onOpen(source.ticketId)}>
+                #{source.ticketId}
+              </button>
+              <span className="ellipsis" style={{ color: "var(--ink)" }}>{source.title}</span>
+              <span className="tiny muted" style={{ marginLeft: "auto", flex: "none" }}>
+                {fullDate(source.modified)}
+              </span>
+            </div>
+            <div className="tiny muted pretty">{source.reason}</div>
+          </div>
+        ))}
+      </div>
+      <div className="td-insight-action" style={{ justifyContent: "flex-start" }}>
+        <button className="btn small" onClick={() => props.onDraft(solution.text)}>
+          Ins Notizfeld
+        </button>
+        <button className="btn small" onClick={() => void copy()}>
+          {copied ? "Kopiert" : "Kopieren"}
+        </button>
+      </div>
+    </Insight>
   );
 }
 
