@@ -143,12 +143,13 @@ Teil dieser Arbeit.
   in den Verlauf (dort steht oft die Lösung); `buildThread` lässt sie heute
   aus.
 
-## Beim Bauen zu prüfen (mit Sörens Einverständnis, nur lesend)
+## Seitenzählung (am 22.10.2026 geprüft, nur lesend)
 
-Ob `page` bei 0 oder 1 beginnt und ob `itemsPerPage` eingehalten wird. Im
-Test kamen mit `page: 1` 100 Tickets; bei über 100 Treffern sagt das nichts
-über die Zählung. Bis das geklärt ist, mit einem Seitenzähler bauen, der
-sich an einer Stelle umstellen lässt.
+`page` beginnt bei **1**; `page: 0` liefert dasselbe wie `page: 1`.
+`itemsPerPage` wird eingehalten, die Liste kommt nach `modifiedTime`
+absteigend, Seiten überlappen nicht. `meta.properties.extras.count` ist nur
+die Größe der Seite, keine Gesamtzahl. Das eigene Sortieren bleibt trotzdem
+drin (kostet nichts, hängt nicht an TANSS-Verhalten).
 
 ## Dem Builder überlassen
 
