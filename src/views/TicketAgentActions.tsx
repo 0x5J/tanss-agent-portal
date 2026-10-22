@@ -4,6 +4,8 @@ import type { TicketRow } from "../../shared/tickets.ts";
 import type { SolutionAnswer } from "../../shared/solution.ts";
 import { fullDate } from "../format.ts";
 import { copyToClipboard } from "../clipboard.ts";
+import { AgentText } from "../AgentText.tsx";
+import { plainAgentText } from "../markdown.ts";
 import { Dot, Icon, SPARK_SMALL } from "../ui/kit.tsx";
 
 type Props = {
@@ -73,13 +75,13 @@ export function TicketAgentActions(props: Props) {
         <div className="td-insights">
           {summary !== null ? (
             <Insight tone="ink" title="Stand der Dinge" onClose={() => setSummary(null)}>
-              <span className="pre">{summary}</span>
+              <AgentText text={summary} />
             </Insight>
           ) : null}
 
           {next ? (
             <Insight tone="ink" title={`Nächster Schritt${next.owner ? ` · am Zug: ${next.owner}` : ""}`} onClose={() => setNext(null)}>
-              <span className="pre">{next.text}</span>
+              <AgentText text={next.text} />
               {next.statusName && next.statusId && !next.unchanged ? (
                 <div className="td-insight-action">
                   <span className="tiny muted">Status passt nicht mehr ({next.currentStatus || "—"})</span>
@@ -232,7 +234,7 @@ function Solution(props: {
     );
   }
   async function copy() {
-    if (await copyToClipboard(solution.text)) setCopied(true);
+    if (await copyToClipboard(plainAgentText(solution.text))) setCopied(true);
     else props.onError(new Error("Kopieren war nicht möglich — bitte den Text markieren und selbst kopieren."));
   }
   const title =
@@ -240,7 +242,7 @@ function Solution(props: {
     (solution.truncated ? " · nicht alle geprüft" : "");
   return (
     <Insight tone="ink" title={title} onClose={props.onClose}>
-      <span className="pre">{solution.text}</span>
+      <AgentText text={solution.text} />
       <div className="td-hits">
         {solution.sources.map((source) => (
           <div key={source.ticketId} className="td-hit">
@@ -258,7 +260,7 @@ function Solution(props: {
         ))}
       </div>
       <div className="td-insight-action" style={{ justifyContent: "flex-start" }}>
-        <button className="btn small" onClick={() => props.onDraft(solution.text)}>
+        <button className="btn small" onClick={() => props.onDraft(plainAgentText(solution.text))}>
           Ins Notizfeld
         </button>
         <button className="btn small" onClick={() => void copy()}>

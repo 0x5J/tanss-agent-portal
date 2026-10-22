@@ -64,7 +64,6 @@
 .td-insight > .dot { position: relative; top: -1px; }
 .td-insight-body { flex: 1; min-width: 0; color: var(--body); text-wrap: pretty; line-height: 22px; }
 .td-insight-title { font-weight: 500; color: var(--ink); }
-.td-insight-body .pre { white-space: pre-line; }
 .td-insight-close {
   flex: none; width: 24px; height: 24px; border-radius: 999px; border: 0; background: transparent; color: var(--body);
   cursor: pointer; font-size: 16px; line-height: 1; align-self: flex-start;

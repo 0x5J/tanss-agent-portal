@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Behoben
+
+- Antworten des Agenten (Lösungsvorschlag, Stand der Dinge, nächster Schritt,
+  Chat, Briefing) zeigen Fettdruck, Überschriften und Listen richtig an statt
+  der Sternchen und Rauten aus dem Modell. „Kopieren“ und „Ins Notizfeld“
+  übernehmen den Text ohne diese Zeichen.
+
 ## [0.5.2] – 2026-10-22
 
 ### Hinzugefügt
