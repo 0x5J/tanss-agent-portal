@@ -167,6 +167,15 @@ describe("rankCandidates", () => {
     ]).map((c) => c.id);
     expect(ids).toEqual([1]);
   });
+  it("lets no candidate in through greeting words of the subject", () => {
+    const list = Array.from({ length: 40 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: i < 5 ? "<p>Hallo zusammen, das VPN geht nicht. Herzliche Grüße</p>" : "<p>Erledigt.</p>",
+      modifiedTime: i,
+    }));
+    expect(rankCandidates({ title: "Drucker druckt nicht", description: "Hallo zusammen, kein Ausdruck. Herzliche Grüße" }, list)).toEqual([]);
+  });
   it("matches across hyphens and inside longer words", () => {
     const ids = rankCandidates({ title: "Drucker offline", description: "" }, [
       { id: 1, title: "Netzwerk-Drucker", modifiedTime: 1 },

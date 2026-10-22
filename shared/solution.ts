@@ -68,6 +68,17 @@ const IDF_MIN_LIST = 7;
 const BODY_QUALIFY_WEIGHT = 0.5;
 
 /**
+ * Salutation and closing words, dropped from the subject's words: they say
+ * nothing about the problem, and stripMailNoise (shared with other features)
+ * neither cuts an opening greeting nor knows every closing.
+ */
+const GREETING_WORDS: ReadonlySet<string> = new Set([
+  "hallo", "zusammen", "guten", "morgen", "sehr", "geehrte", "geehrter", "damen", "herren", "liebe", "lieber", "danke",
+  "vielen", "dank", "gruß", "grüße", "grüßen", "freundlichen", "beste", "besten", "herzliche", "herzlichen", "schöne",
+  "viele", "bitte",
+]);
+
+/**
  * A TANSS description as text that keeps its lines, so stripMailNoise can
  * cut greeting, signature and quoted mails: block ends and <br> become line
  * breaks, other tags a space.
@@ -99,19 +110,24 @@ function hasWord(index: { set: Set<string>; joined: string }, word: string): boo
 /**
  * Done tickets that share words with the subject, best first.
  *
- * Subject words come from the title and the description without greeting,
- * signature and quoted mails (stripMailNoise). Each word has a weight
+ * Subject words come from the title and the description; stripMailNoise cuts
+ * quoted mails and everything from a known closing ("Mit freundlichen Grüßen",
+ * …) on, and salutation/closing words (GREETING_WORDS) are dropped. Each word has a weight
  * ln(N / df) / ln(N), with N the number of done tickets (at least 7) and df
  * the tickets it hits — 1 for a word only one ticket has, 0 for a word every
  * ticket has.
  *
  * Qualifying and ranking are separate. A candidate qualifies only through a
  * subject word with weight > 0 in its title, or one with weight ≥
- * BODY_QUALIFY_WEIGHT (df ≤ √N) in its description or internal note. Mail
- * signatures, greetings and addresses never sit in titles and are frequent
- * in bodies, so they cannot qualify a ticket, however many of them add up —
- * one customer's tickets from several senders keep each signature at a
- * middling weight, which a score floor could not tell from a topic.
+ * BODY_QUALIFY_WEIGHT (df ≤ √N) in its description or internal note.
+ * Signature words do not sit in titles, and a signature common in the list
+ * stays under the body threshold, so it cannot qualify a ticket however many
+ * of its words add up — one customer's tickets from several senders keep
+ * each signature at a middling weight, which a score floor could not tell
+ * from a topic. Not airtight: a signature after a closing stripMailNoise does
+ * not know ("VG", "Gruß") stays in the subject words and can still qualify
+ * the tickets of a sender who has at most √N of them; the model's pick then
+ * filters those out.
  * Qualified candidates rank by the sum over all subject words: 3 × weight
  * for a title hit, otherwise 1 × weight for a body hit, a word once per
  * candidate. Ties go to the newer ticket. Lists under 7 tickets are weighed
@@ -122,7 +138,9 @@ export function rankCandidates(
   tickets: Record<string, unknown>[],
   limit: number = SOLUTION_MAX_CANDIDATES,
 ): SolutionCandidate[] {
-  const wanted = problemWords(`${subject.title}\n${stripMailNoise(plainLines(subject.description))}`);
+  const wanted = problemWords(`${subject.title}\n${stripMailNoise(plainLines(subject.description))}`).filter(
+    (w) => !GREETING_WORDS.has(w),
+  );
   if (wanted.length === 0) return [];
   const indexed = tickets
     .map((t) => ({
