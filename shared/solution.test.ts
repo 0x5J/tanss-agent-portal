@@ -90,6 +90,36 @@ describe("rankCandidates", () => {
     expect(ranked.slice(0, 2).map((c) => c.id)).toEqual([2, 1]);
     expect(ranked.some((c) => c.id >= 100)).toBe(false);
   });
+  it("keeps a recurring topic of the customer", () => {
+    const signature =
+      "<p>Mit freundlichen Grüßen</p><p>Max Mustermann · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789</p>";
+    const backup = Array.from({ length: 12 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "Veeam Backup fehlgeschlagen" : "Backup Fehler Sicherung",
+      content: `<p>Hallo, die Sicherung lief nicht durch.</p>${signature}`,
+      internalContent: "Veeam Repository voll, alte Wiederherstellungspunkte gelöscht",
+      modifiedTime: 100 + i,
+    }));
+    const other = Array.from({ length: 28 }, (_, i) => ({
+      id: 100 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Hallo, bitte kümmern.</p>${signature}`,
+      modifiedTime: 1_000 + i,
+    }));
+    const ranked = rankCandidates(
+      { title: "Veeam Backup fehlgeschlagen", description: `<p>Hallo, der Veeam Job der Nacht ist fehlgeschlagen.</p>${signature}` },
+      [...other, ...backup],
+    );
+    expect(ranked.map((c) => c.id).sort((a, b) => a - b)).toEqual(backup.map((t) => t.id));
+  });
+  it("keeps a topic in 4 of 10 tickets", () => {
+    const signature = "Grüße Max Mustermann Musterstraße Musterstadt";
+    const ranked = rankCandidates({ title: "Backup fehlgeschlagen", description: signature }, [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: 1 + i, title: "Backup Fehler", content: signature, modifiedTime: i })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: 10 + i, title: "Drucker", content: signature, modifiedTime: 100 + i })),
+    ]);
+    expect(ranked.map((c) => c.id)).toEqual([4, 3, 2, 1]);
+  });
   it("matches across hyphens and inside longer words", () => {
     const ids = rankCandidates({ title: "Drucker offline", description: "" }, [
       { id: 1, title: "Netzwerk-Drucker", modifiedTime: 1 },

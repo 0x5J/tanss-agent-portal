@@ -59,12 +59,10 @@ export function problemWords(text: string): string[] {
 
 /** A subject word this long also matches a longer word that contains it ("drucker" in "etikettendrucker"). */
 const PART_MATCH_MIN = 5;
-/** Lists shorter than this are too small to tell boilerplate from a real topic. */
-const BOILERPLATE_MIN_LIST = 7;
-/** Share of the done tickets above which a subject word counts as boilerplate … */
-const BOILERPLATE_SHARE = 0.15;
-/** … but a word hitting at most this many tickets is always kept. */
-const BOILERPLATE_MIN_HITS = 3;
+/** Lists are weighed as if they had at least this many tickets, so tiny lists still score. */
+const IDF_MIN_LIST = 7;
+/** Candidates scoring below this drop out: half of one body hit of a word no other ticket has. */
+const SCORE_FLOOR = 0.5;
 
 /** The words of a text, for exact lookup and for part matches. */
 function wordIndex(text: string): { set: Set<string>; joined: string } {
@@ -78,16 +76,20 @@ function hasWord(index: { set: Set<string>; joined: string }, word: string): boo
 }
 
 /**
- * Done tickets that share words with the subject, best first. A subject word
- * scores 3 when it is in the candidate's title, otherwise 1 when it is in the
- * description or internal note; a word counts once per candidate, tickets
- * without a hit drop out, ties go to the newer one.
+ * Done tickets that share words with the subject, best first. Each subject
+ * word has a weight: ln(N / df) / ln(N), with N the number of done tickets
+ * (at least 7) and df the tickets it hits — 1 for a word only one ticket has,
+ * 0 for a word every ticket has. A hit in the candidate's title scores
+ * 3 × weight, otherwise a hit in the description or internal note 1 × weight;
+ * a word counts once per candidate. Ties go to the newer ticket.
  *
  * Mail tickets of one customer share signatures, greetings, addresses and
- * phone numbers, so those words would rank any ticket of the same sender
- * high. A subject word is therefore ignored as boilerplate when it hits more
- * than 15 % of the given done tickets (and more than 3 of them); the rule only
- * applies from 7 tickets on, so tiny lists keep every word.
+ * phone numbers; the weight takes those words to (nearly) nothing, while a
+ * recurring topic (many backup tickets) still counts. Candidates below
+ * SCORE_FLOOR drop out, so a ticket that shares only boilerplate — or
+ * nothing — with the subject is not handed to the model. Lists under 7
+ * tickets are weighed as if they had 7: they are too small to tell
+ * boilerplate from a topic, so every word keeps a weight there.
  */
 export function rankCandidates(
   subject: { title: string; description: string },
@@ -105,18 +107,18 @@ export function rankCandidates(
     }))
     .filter((c) => Number.isFinite(c.id));
 
-  let words = wanted;
-  if (indexed.length >= BOILERPLATE_MIN_LIST) {
-    const maxHits = Math.max(BOILERPLATE_MIN_HITS, indexed.length * BOILERPLATE_SHARE);
-    words = wanted.filter((w) => indexed.filter((c) => hasWord(c.title, w) || hasWord(c.body, w)).length <= maxHits);
+  const n = Math.max(IDF_MIN_LIST, indexed.length);
+  const weights = new Map<string, number>();
+  for (const w of wanted) {
+    const df = indexed.filter((c) => hasWord(c.title, w) || hasWord(c.body, w)).length;
+    if (df > 0) weights.set(w, Math.log(n / df) / Math.log(n));
   }
-  if (words.length === 0) return [];
 
   const ranked: SolutionCandidate[] = [];
   for (const { t, id, title, body } of indexed) {
     let score = 0;
-    for (const w of words) score += hasWord(title, w) ? 3 : hasWord(body, w) ? 1 : 0;
-    if (score === 0) continue;
+    for (const [w, weight] of weights) score += hasWord(title, w) ? 3 * weight : hasWord(body, w) ? weight : 0;
+    if (score < SCORE_FLOOR) continue;
     ranked.push({
       id,
       title: String(t.title ?? ""),
