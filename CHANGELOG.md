@@ -6,6 +6,16 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- „Lösung vorschlagen“ im Ticket: Der Agent sucht unter den erledigten
+  Tickets desselben Kunden der letzten 12 Monate nach dem gleichen Problem,
+  liest deren Verlauf und schlägt mit Verweis auf die Quell-Tickets vor, wie
+  es damals gelöst wurde; der Vorschlag lässt sich ins Notizfeld übernehmen.
+- Tickets: Mehrere Tickets lassen sich einem beliebigen Techniker zuweisen
+  („Zuweisen an …“ in der Auswahlleiste oder ⇧A, mit Suchfeld); `a` weist
+  weiterhin nur dem eigenen Konto zu.
+
 ## [0.5.1] – 2026-10-20
 
 ### Geändert

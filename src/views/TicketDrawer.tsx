@@ -196,6 +196,7 @@ export function TicketDrawer(props: Props) {
               <>
                 {ticket ? (
                   <TicketAgentActions
+                    key={ticketId}
                     ticketId={ticketId}
                     ready={props.agentReady}
                     entries={detail.thread.length}
@@ -204,6 +205,13 @@ export function TicketDrawer(props: Props) {
                     onSetStatus={(statusId, name) => void patch({ statusId }, `Status → ${name}`)}
                     onSetCompany={(companyId, name) => void patch({ companyId }, `Kunde → ${name}`)}
                     onOpen={props.onOpen}
+                    onDraft={(draft) => {
+                      // A solution is a plain note, never saved under a mail-draft title.
+                      setInternal(true);
+                      setTitle("");
+                      setText(draft);
+                      document.getElementById("drawer-reply")?.scrollIntoView({ block: "end", behavior: "smooth" });
+                    }}
                     onError={onError}
                   />
                 ) : null}

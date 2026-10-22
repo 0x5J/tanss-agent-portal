@@ -24,6 +24,7 @@ import type { Activity } from "../shared/activity.ts";
 import type { BriefingFacts, ChatTurn, CompanyCheck, DraftIntent, NextStep, PatternGroup, SimilarHit } from "../shared/agent.ts";
 import type { ClaimEntry, CollectorHealth, DashboardDay } from "../shared/dashboard.ts";
 import type { SavedView } from "../shared/filters.ts";
+import type { SolutionAnswer } from "../shared/solution.ts";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -253,6 +254,8 @@ export const api = {
         "/me/agent/similar",
         payload,
       ),
+    /** How done tickets of the same customer solved this problem; reads only, writes nothing. */
+    solution: (ticketId: number) => request<SolutionAnswer>("POST", "/me/agent/solution", { ticketId }),
     company: (ticketId: number) => request<CompanyCheck>("POST", "/me/agent/company", { ticketId }),
     cleanMail: (ticketId: number, mailKey: string) =>
       request<{ text: string; strippedChars: number }>("POST", "/me/agent/clean-mail", { ticketId, mailKey }),

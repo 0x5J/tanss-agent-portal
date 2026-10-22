@@ -88,7 +88,18 @@ import {
   type ToolDef,
 } from "./llm.ts";
 import type { Store } from "./store.ts";
-import type { TanssClient, TanssSession } from "./tanss.ts";
+import { TanssError, type TanssClient, type TanssSession } from "./tanss.ts";
+import { createDoneTickets, type DoneTickets } from "./done-tickets.ts";
+import {
+  SOLUTION_MESSAGES,
+  parseSolutionPick,
+  plainText,
+  rankCandidates,
+  solutionPickPrompt,
+  solutionPrompt,
+  type SolutionAnswer,
+  type SolutionSource,
+} from "../shared/solution.ts";
 
 export type AgentDeps = {
   tanss: TanssClient;
@@ -238,6 +249,10 @@ const similarSchema = rowsSchema.extend({ ticketId: z.number().int().positive() 
 const SIMILAR_MAX_CANDIDATES = 60;
 /** Companies the customer check offers the model to choose from. */
 const COMPANY_MAX_CANDIDATES = 10;
+/** Share of the thread budget for the ticket a solution is wanted for; the sources split the rest. */
+const SOLUTION_SUBJECT_SHARE = 1 / 3;
+/** Most characters of a source ticket's internal note in the proposal prompt (and never more than a quarter of its share). */
+const SOLUTION_NOTE_CHARS = 2_000;
 
 const issueTextSchema = z.object({
   issue: z.string().trim().min(1).max(60),
@@ -264,6 +279,8 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
   const { tanss, llm, store, now, withSession, mapPool } = deps;
   /** One briefing per employee, scope and day; `force` throws it away. */
   const briefings = new Map<string, { day: string; facts: BriefingFacts; text: string; at: number }>();
+  /** Done tickets per employee and customer, in memory for a few minutes. */
+  const doneTickets = createDoneTickets({ tanss, now });
 
   function settings(): LlmSettings {
     return store.llm();
@@ -281,13 +298,19 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
     id: number,
     /** Fraction of the thread budget this ticket may use (several tickets share one prompt). */
     share = 1,
-  ): Promise<{ row: TicketRow; context: string; thread: ThreadEntry[]; description: string }> {
+  ): Promise<{ row: TicketRow; context: string; thread: ThreadEntry[]; description: string; internalNote: string }> {
     const [ticket, history] = await Promise.all([tanss.ticketById(session, id), tanss.ticketHistory(session, id)]);
     const linked = { ...history.linked, ...ticket.linked };
     const row = toTicketRow(ticket.item, linked, []);
     const thread = buildThread(ticket.item, history.content, linked, row.companyName);
     const budget = Math.round(threadBudget(settings().contextTokens) * share);
-    return { row, context: ticketContext(row, thread, budget), thread, description: String(ticket.item.content ?? "") };
+    return {
+      row,
+      context: ticketContext(row, thread, budget),
+      thread,
+      description: String(ticket.item.content ?? ""),
+      internalNote: String(ticket.item.internalContent ?? ""),
+    };
   }
 
   type ChatState = {
@@ -685,6 +708,79 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentDeps): void
         return { ...hit, title: row.title, companyName: row.companyName, statusName: row.statusName };
       });
       return { similar, checked: pool.length, searched: query, searchHits: hits.length };
+    });
+  });
+
+  /**
+   * How the same problem was solved before: done tickets of the customer,
+   * pre-selected by shared words, picked by the model, read in full, and
+   * turned into a proposal. Nothing is written anywhere.
+   */
+  app.post("/me/agent/solution", async (request, reply) => {
+    const parsed = ticketSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Ticketnummer fehlt" });
+    return withSession(request, reply, async (session): Promise<SolutionAnswer> => {
+      configured();
+      const id = parsed.data.ticketId;
+      const subject = await loadTicket(session, id, SOLUTION_SUBJECT_SHARE);
+      const empty = (
+        verdict: Exclude<SolutionAnswer["verdict"], "ok">,
+        counts: { checked: number; truncated: boolean } = { checked: 0, truncated: false },
+      ): SolutionAnswer => ({ verdict, text: SOLUTION_MESSAGES[verdict], sources: [], read: 0, ...counts });
+      if (!subject.row.companyId) return empty("no-company");
+
+      let list: DoneTickets;
+      try {
+        list = await doneTickets.get(session, subject.row.companyId);
+      } catch (error) {
+        // A 401 stays as it is so the session can heal.
+        if (error instanceof TanssError && error.status !== 401) {
+          throw new TanssError(`Erledigte Tickets konnten nicht geladen werden: ${error.message}`, error.status);
+        }
+        throw error;
+      }
+      // The list is shared with the cache: filter() copies, nothing sorts in place.
+      const done = list.done.filter((t) => Number(t.id) !== id);
+      const counts = { checked: done.length, truncated: list.truncated };
+      if (done.length === 0) return empty("no-done", counts);
+
+      const candidates = rankCandidates({ title: subject.row.title, description: subject.description }, done);
+      if (candidates.length === 0) return empty("no-match", counts);
+      const picked = parseSolutionPick(
+        extractJson(await ask(solutionPickPrompt(subject.row, subject.description, candidates), { json: true, maxTokens: 600 })),
+        new Set(candidates.map((c) => c.id)),
+      );
+      if (picked.length === 0) return empty("no-match", counts);
+
+      // Subject and sources together stay within one thread budget; each
+      // source's internal note is part of that source's share.
+      const sourceShare = (1 - SOLUTION_SUBJECT_SHARE) / picked.length;
+      const sourceChars = Math.floor(threadBudget(settings().contextTokens) * sourceShare);
+      const noteChars = Math.min(SOLUTION_NOTE_CHARS, Math.floor(sourceChars / 4));
+      const settled = await Promise.allSettled(picked.map((hit) => loadTicket(session, hit.ticketId, sourceShare)));
+      // An expired session is not "unreadable": let withSession heal it.
+      const expired = settled.find(
+        (r): r is PromiseRejectedResult => r.status === "rejected" && r.reason instanceof TanssError && r.reason.status === 401,
+      );
+      if (expired) throw expired.reason;
+      const sources: SolutionSource[] = [];
+      const read: { ticketId: number; context: string; internalNote: string }[] = [];
+      settled.forEach((result, i) => {
+        if (result.status !== "fulfilled") return;
+        const hit = picked[i];
+        const candidate = candidates.find((c) => c.id === hit.ticketId)!;
+        const internalNote = plainText(result.value.internalNote).slice(0, noteChars);
+        sources.push({ ticketId: hit.ticketId, title: candidate.title, modified: candidate.modified, reason: hit.reason });
+        read.push({
+          ticketId: hit.ticketId,
+          context: ticketContext(result.value.row, result.value.thread, sourceChars - internalNote.length),
+          internalNote,
+        });
+      });
+      if (read.length === 0) return empty("unreadable", counts);
+
+      const text = await ask(solutionPrompt(subject.context, read), { maxTokens: 900 });
+      return { verdict: "ok", text, sources, read: read.length, ...counts };
     });
   });
 

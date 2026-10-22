@@ -1,0 +1,255 @@
+import { describe, expect, it } from "vitest";
+import {
+  SOLUTION_MAX_READ,
+  SOLUTION_MESSAGES,
+  parseSolutionPick,
+  problemWords,
+  rankCandidates,
+  solutionPickPrompt,
+  solutionPrompt,
+} from "./solution.ts";
+import type { TicketRow } from "./tickets.ts";
+
+const row: TicketRow = {
+  id: 4711, title: "Backup Fehler auf DC01", companyId: 1, companyName: "Müller", projectId: 0, projectName: "", statusId: 1, statusName: "Neu",
+  typeName: "Störung", assigneeId: 0, assigneeName: "", departmentName: "", modified: 0, creationDate: 1_750_000_000, dueDate: 0,
+  deadlineDate: 0, waiting: false, isProject: false, estimatedMinutes: 0,
+};
+
+const subject = { title: "Backup Fehler auf DC01", description: "Veeam Job bricht ab" };
+const tickets = [
+  { id: 1, title: "Backup Fehler DC02", content: "", modifiedTime: 100 },
+  { id: 2, title: "Drucker", content: "Veeam Lizenz", modifiedTime: 300 },
+  { id: 3, title: "Urlaub", content: "", modifiedTime: 500 },
+  { id: 4, title: "Backup", content: "", internalContent: "Veeam neu gestartet", modifiedTime: 200 },
+];
+
+describe("problemWords", () => {
+  it("drops HTML, short words and stop words, keeps first-occurrence order", () => {
+    expect(problemWords("<p>Drucker im Büro druckt nicht mehr</p>")).toEqual(["drucker", "büro", "druckt"]);
+  });
+  it("lower-cases and de-duplicates", () => {
+    expect(problemWords("Backup BACKUP backup Fehler")).toEqual(["backup", "fehler"]);
+  });
+  it("splits at hyphens", () => {
+    expect(problemWords("Drucker-Warteschlange hängt")).toEqual(["drucker", "warteschlange", "hängt"]);
+  });
+  it("separates words at tags and entities", () => {
+    expect(problemWords("<td>Drucker</td><td>Toner</td>&nbsp;leer")).toEqual(["drucker", "toner", "leer"]);
+  });
+});
+
+describe("rankCandidates", () => {
+  it("scores title hits 3, body hits 1, drops zero scores, newer first on ties", () => {
+    expect(rankCandidates(subject, tickets).map((c) => c.id)).toEqual([1, 4, 2]);
+  });
+  it("counts a word only once per candidate", () => {
+    const [hit] = rankCandidates({ title: "Backup", description: "" }, [
+      { id: 7, title: "Backup", content: "Backup Backup", internalContent: "backup", modifiedTime: 1 },
+    ]);
+    expect(hit?.score).toBe(3);
+  });
+  it("breaks ties by newer modifiedTime", () => {
+    const ids = rankCandidates({ title: "Backup", description: "" }, [
+      { id: 1, title: "Backup", modifiedTime: 10 },
+      { id: 2, title: "Backup", modifiedTime: 20 },
+    ]).map((c) => c.id);
+    expect(ids).toEqual([2, 1]);
+  });
+  it("respects the limit", () => {
+    expect(rankCandidates(subject, tickets, 2).map((c) => c.id)).toEqual([1, 4]);
+  });
+  it("fills title, modified and an HTML-free excerpt of at most 200 characters", () => {
+    const [hit] = rankCandidates({ title: "Backup", description: "" }, [
+      { id: 5, title: "Backup kaputt", content: `<p>${"x".repeat(300)}</p>`, modifiedTime: 42 },
+    ]);
+    expect(hit).toMatchObject({ id: 5, title: "Backup kaputt", modified: 42 });
+    expect(hit?.excerpt).toBe("x".repeat(200));
+  });
+  it("copes with missing fields", () => {
+    const [hit] = rankCandidates({ title: "Backup", description: "" }, [{ id: 6, title: "Backup" }]);
+    expect(hit).toMatchObject({ id: 6, excerpt: "", modified: 0 });
+  });
+  it("ignores mail boilerplate shared by many done tickets", () => {
+    const signature =
+      "<p>Mit freundlichen Grüßen</p><p>Max Mustermann · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789</p>";
+    const vpn = Array.from({ length: 40 }, (_, i) => ({
+      id: 100 + i,
+      title: "VPN Problem",
+      content: `<p>Hallo, das VPN verbindet sich nicht.</p>${signature}`,
+      modifiedTime: 1_000 + i,
+    }));
+    const printers = [
+      { id: 1, title: "Etikettendrucker Lager", content: `<p>Etiketten kommen leer heraus.</p>${signature}`, modifiedTime: 10 },
+      { id: 2, title: "Druckerwarteschlange hängt", content: `<p>Aufträge bleiben stehen.</p>${signature}`, modifiedTime: 20 },
+    ];
+    const ranked = rankCandidates(
+      { title: "Drucker druckt nicht", description: `<p>Hallo, der Drucker im Büro druckt nichts mehr.</p>${signature}` },
+      [...vpn, ...printers],
+    );
+    expect(ranked.slice(0, 2).map((c) => c.id)).toEqual([2, 1]);
+    expect(ranked.some((c) => c.id >= 100)).toBe(false);
+  });
+  it("keeps a recurring topic of the customer", () => {
+    const signature =
+      "<p>Mit freundlichen Grüßen</p><p>Max Mustermann · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789</p>";
+    const backup = Array.from({ length: 12 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "Veeam Backup fehlgeschlagen" : "Backup Fehler Sicherung",
+      content: `<p>Hallo, die Sicherung lief nicht durch.</p>${signature}`,
+      internalContent: "Veeam Repository voll, alte Wiederherstellungspunkte gelöscht",
+      modifiedTime: 100 + i,
+    }));
+    const other = Array.from({ length: 28 }, (_, i) => ({
+      id: 100 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Hallo, bitte kümmern.</p>${signature}`,
+      modifiedTime: 1_000 + i,
+    }));
+    const ranked = rankCandidates(
+      { title: "Veeam Backup fehlgeschlagen", description: `<p>Hallo, der Veeam Job der Nacht ist fehlgeschlagen.</p>${signature}` },
+      [...other, ...backup],
+    );
+    expect(ranked.map((c) => c.id).sort((a, b) => a - b)).toEqual(backup.map((t) => t.id));
+  });
+  it("keeps a topic in 4 of 10 tickets", () => {
+    const signature = "Grüße Max Mustermann Musterstraße Musterstadt";
+    const ranked = rankCandidates({ title: "Backup fehlgeschlagen", description: signature }, [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: 1 + i, title: "Backup Fehler", content: signature, modifiedTime: i })),
+      ...Array.from({ length: 6 }, (_, i) => ({ id: 10 + i, title: "Drucker", content: signature, modifiedTime: 100 + i })),
+    ]);
+    expect(ranked.map((c) => c.id)).toEqual([4, 3, 2, 1]);
+  });
+  // Signature lines without a greeting before them: stripMailNoise keeps them, the qualify rule has to hold.
+  const bareSignature = (who: string) => `<p>${who} · Lagerleitung · Musterstraße 12 · 12345 Musterstadt · Telefon 0123 456789 · Zentrale</p>`;
+  it("lets no candidate in through a signature in 70 % of the tickets", () => {
+    const sig = bareSignature("Max Mustermann");
+    const list = Array.from({ length: 40 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Bitte erledigen.</p>${i < 28 ? sig : ""}`,
+      modifiedTime: i,
+    }));
+    expect(rankCandidates({ title: "Drucker druckt nicht", description: `<p>Kein Ausdruck.</p>${sig}` }, list)).toEqual([]);
+  });
+  it("ranks a topic above a sender's signature when two senders share the list", () => {
+    const sigA = bareSignature("Max Mustermann");
+    const sigB = "<p>Erika Beispiel · Einkauf · Beispielweg 7 · 54321 Beispielstadt · Mobil 0987 654321 · Filiale</p>";
+    const list = Array.from({ length: 100 }, (_, i) => ({
+      id: 1 + i,
+      title: i < 30 ? "Backup Fehler" : i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: `<p>Bitte erledigen.</p>${i % 2 ? sigA : sigB}`,
+      modifiedTime: i,
+    }));
+    const ranked = rankCandidates({ title: "Backup fehlgeschlagen", description: `<p>Die Nacht lief nicht durch.</p>${sigA}` }, list);
+    expect(ranked.map((c) => c.id).sort((a, b) => a - b)).toEqual(list.slice(0, 30).map((t) => t.id));
+  });
+  it("keeps body-only matches when the signature is in half the tickets", () => {
+    const sig = bareSignature("Max Mustermann");
+    const list = Array.from({ length: 100 }, (_, i) => ({
+      id: 1 + i,
+      title: i < 3 ? "Störung Lager" : i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: i < 3 ? `<p>Der Drucker im Lager druckt nur leere Seiten.</p>${sig}` : `<p>Bitte erledigen.</p>${i % 2 ? sig : ""}`,
+      modifiedTime: 1_000 - i,
+    }));
+    const ranked = rankCandidates({ title: "Drucker druckt nicht", description: `<p>Kein Ausdruck.</p>${sig}` }, list);
+    expect(ranked.map((c) => c.id)).toEqual([1, 2, 3]);
+  });
+  it("leaves greeting, signature and quoted mail of the subject out", () => {
+    const description =
+      "<p>Hallo,</p><p>der Drucker druckt nicht.</p><p>Mit freundlichen Grüßen<br>Max Mustermann<br>Lagerleitung</p>" +
+      "<p>Von: Erika Beispiel<br>Betreff: Etiketten</p><p>Die Etiketten fehlen.</p>";
+    const ids = rankCandidates({ title: "Störung", description }, [
+      { id: 1, title: "Drucker offline", modifiedTime: 1 },
+      { id: 2, title: "Lagerleitung Zugang", modifiedTime: 2 },
+      { id: 3, title: "Etiketten bestellen", modifiedTime: 3 },
+      { id: 4, title: "Mustermann Passwort", modifiedTime: 4 },
+    ]).map((c) => c.id);
+    expect(ids).toEqual([1]);
+  });
+  it("lets no candidate in through greeting words of the subject", () => {
+    const list = Array.from({ length: 40 }, (_, i) => ({
+      id: 1 + i,
+      title: i % 2 ? "VPN Problem" : "Neuer Benutzer",
+      content: i < 5 ? "<p>Hallo zusammen, das VPN geht nicht. Herzliche Grüße</p>" : "<p>Erledigt.</p>",
+      modifiedTime: i,
+    }));
+    expect(rankCandidates({ title: "Drucker druckt nicht", description: "Hallo zusammen, kein Ausdruck. Herzliche Grüße" }, list)).toEqual([]);
+  });
+  it("matches across hyphens and inside longer words", () => {
+    const ids = rankCandidates({ title: "Drucker offline", description: "" }, [
+      { id: 1, title: "Netzwerk-Drucker", modifiedTime: 1 },
+      { id: 2, title: "Etikettendrucker Lager", modifiedTime: 2 },
+      { id: 3, title: "Druckt nicht", modifiedTime: 3 },
+    ]).map((c) => c.id);
+    expect(ids).toEqual([2, 1]);
+  });
+  it("matches short subject words only as whole words", () => {
+    expect(rankCandidates({ title: "Mail", description: "" }, [{ id: 1, title: "Mailbox voll" }])).toEqual([]);
+  });
+  it("returns nothing when the subject has no usable word", () => {
+    expect(rankCandidates({ title: "Ja", description: "" }, tickets)).toEqual([]);
+  });
+});
+
+describe("parseSolutionPick", () => {
+  it("keeps known ids once, at most SOLUTION_MAX_READ", () => {
+    const known = new Set([1, 2, 3, 4, 5, 6, 7]);
+    const picks = parseSolutionPick(
+      {
+        similar: [
+          { ticketId: 1, reason: "a" }, { ticketId: 9, reason: "b" }, { ticketId: 1, reason: "c" },
+          { ticketId: 2, reason: "d" }, { ticketId: 3, reason: "e" }, { ticketId: 4, reason: "f" },
+          { ticketId: 5, reason: "g" }, { ticketId: 6, reason: "h" }, { ticketId: 7, reason: "i" },
+        ],
+      },
+      known,
+    );
+    expect(SOLUTION_MAX_READ).toBe(5);
+    expect(picks.map((p) => p.ticketId)).toEqual([1, 2, 3, 4, 5]);
+    expect(picks[0]?.reason).toBe("a");
+  });
+  it("returns an empty list for garbage", () => {
+    expect(parseSolutionPick(null, new Set([1]))).toEqual([]);
+  });
+});
+
+describe("solutionPickPrompt", () => {
+  it("names every candidate and asks for JSON with at most 5 entries", () => {
+    const candidates = rankCandidates(subject, tickets);
+    const prompt = solutionPickPrompt(row, "Veeam Job bricht ab", candidates);
+    for (const c of candidates) expect(prompt).toContain(`#${c.id}`);
+    expect(prompt).toContain('{"similar":[');
+    expect(prompt).toMatch(/höchstens 5/);
+    expect(prompt).toContain("#4711");
+  });
+  it("passes the description as plain text", () => {
+    const prompt = solutionPickPrompt(row, "<p>Veeam&nbsp;Job <b>bricht</b> ab</p>", []);
+    expect(prompt).toContain("Veeam Job bricht ab");
+    expect(prompt).not.toContain("<p>");
+  });
+});
+
+describe("solutionPrompt", () => {
+  it("includes each source, the internal note and the stay-with-the-thread instruction", () => {
+    const prompt = solutionPrompt("KONTEXT AKTUELL", [
+      { ticketId: 11, context: "VERLAUF ELF", internalNote: "Lizenz erneuert" },
+      { ticketId: 12, context: "VERLAUF ZWÖLF", internalNote: "" },
+    ]);
+    expect(prompt).toContain("KONTEXT AKTUELL");
+    expect(prompt).toContain("#11");
+    expect(prompt).toContain("VERLAUF ELF");
+    expect(prompt).toContain("VERLAUF ZWÖLF");
+    expect(prompt).toContain("Interne Notiz am Ticket");
+    expect(prompt).toContain("Lizenz erneuert");
+    expect(prompt.match(/Interne Notiz am Ticket/g)).toHaveLength(1);
+    expect(prompt).toMatch(/nur.*was in den Verläufen steht/i);
+  });
+});
+
+describe("SOLUTION_MESSAGES", () => {
+  it("has a message for every non-ok verdict", () => {
+    expect(Object.keys(SOLUTION_MESSAGES).sort()).toEqual(["no-company", "no-done", "no-match", "unreadable"]);
+    expect(SOLUTION_MESSAGES["no-company"]).toBe("Ticket hat keinen Kunden — es gibt nichts zu vergleichen.");
+  });
+});

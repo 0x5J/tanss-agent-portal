@@ -36,6 +36,7 @@ function fakeTanss(overrides: Partial<TanssClient> = {}) {
       linked: { ticketStates: { "6": { name: "Wartet" }, "2": { name: "Neu" } } },
       waitingStates: [6],
     }),
+    customTicketList: record("customTicketList", { items: [], linked: {} }),
     ticketById: record("ticketById", {
       item: { id: 1, title: "A", content: "Beschreibung", statusId: 2, companyId: 5, remitterId: 3 },
       linked: { companies: { "5": { name: "Kunde" } } },

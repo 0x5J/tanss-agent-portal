@@ -318,13 +318,15 @@ export function parseNextStep(value: unknown, stateNames: string[]): NextStep {
 
 export type SimilarHit = { ticketId: number; reason: string };
 
+/** Words too common to say anything about a problem; lower case. */
+export const STOP_WORDS: ReadonlySet<string> = new Set(["und", "oder", "der", "die", "das", "für", "mit", "auf", "von", "bei", "nach", "über", "nicht", "mehr", "eine", "einen", "einer", "dem", "den", "des", "ist", "seit", "zum", "zur", "wird", "kein", "keine", "neue", "neuer", "neues"]);
+
 /** Words of a title worth searching for: no stop words, no short tokens. */
 export function searchTerms(title: string): string {
-  const stop = new Set(["und", "oder", "der", "die", "das", "für", "mit", "auf", "von", "bei", "nach", "über", "nicht", "mehr", "eine", "einen", "einer", "dem", "den", "des", "ist", "seit", "zum", "zur", "wird", "kein", "keine", "neue", "neuer", "neues"]);
   return title
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 4 && !stop.has(w.toLowerCase()))
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w.toLowerCase()))
     .slice(0, 4)
     .join(" ");
 }
