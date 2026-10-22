@@ -59,13 +59,23 @@ describe("parseBlocks", () => {
     ]);
   });
 
-  it("drops fence lines but keeps the code they hold", () => {
-    expect(parseBlocks("Befehl:\n```powershell\nRestart-Service Spooler\n```\n```ipconfig /flushdns```\n```net stop spooler")).toEqual([
+  it("keeps code between fences as written and drops the language tag", () => {
+    expect(parseBlocks("Befehl:\n```powershell\nWrite-Host \"a`tb\" **x**\n```\nDanach neu starten.")).toEqual([
       { kind: "p", lines: ["Befehl:"] },
-      { kind: "p", lines: ["Restart-Service Spooler"] },
-      { kind: "p", lines: ["`ipconfig /flushdns`", "net stop spooler"] },
+      { kind: "code", lines: ['Write-Host "a`tb" **x**'] },
+      { kind: "p", lines: ["Danach neu starten."] },
     ]);
+  });
+
+  it("reads a one-line fence as code, inner backticks included", () => {
+    expect(parseBlocks("```Write-Host \"a`tb\"```")).toEqual([{ kind: "code", lines: ['Write-Host "a`tb"'] }]);
     expect(plainAgentText("```ipconfig /flushdns```")).toBe("ipconfig /flushdns");
+  });
+
+  it("keeps a one-word command after a fence", () => {
+    expect(parseBlocks("```hostname\n```")).toEqual([{ kind: "code", lines: ["hostname"] }]);
+    expect(parseBlocks("```hostname")).toEqual([{ kind: "p", lines: ["hostname"] }]);
+    expect(parseBlocks("```ipconfig /all\nweiter")).toEqual([{ kind: "p", lines: ["ipconfig /all", "weiter"] }]);
   });
 
   it("keeps the numbering when items are split by blank lines", () => {

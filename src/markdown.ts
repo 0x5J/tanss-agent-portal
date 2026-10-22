@@ -1,7 +1,7 @@
 /**
  * Local models answer in Markdown even when asked for plain text. This reads
  * the small part of it they actually use — headings, lists, bold, italic,
- * inline code — so the views can draw it instead of showing the stars. No
+ * code — so the views can draw it instead of showing the stars. No
  * HTML is ever built from the text; anything unknown stays as it was written.
  */
 
@@ -11,17 +11,19 @@ export type Block =
   | { kind: "p"; lines: string[] }
   | { kind: "h"; text: string }
   | { kind: "ul"; items: string[] }
-  | { kind: "ol"; start: number; items: string[] };
+  | { kind: "ol"; start: number; items: string[] }
+  | { kind: "code"; lines: string[] };
 
 const HEADING = /^#{1,6}\s+(.*?)\s*#*\s*$/;
 const BULLET = /^\s*[-*+•]\s+(.*)$/;
 const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
-// "```" alone or with a language tag opens or closes a code block and is
-// dropped; the lines between stay as text. "```cmd```" on one line is code.
-const FENCE = /^\s*```\s*[\w+#.-]*\s*$/;
+// Code between fences is kept exactly as written. "```cmd```" on one line is
+// a code block too; a fence that never closes only loses its marks.
 const ONE_LINE_FENCE = /^\s*```(.*?)```\s*$/;
-const FENCE_START = /^\s*```/;
+const FENCE_START = /^\s*```(.*)$/;
+const FENCE_END = /^\s*```\s*$/;
+const LANGUAGE_TAG = /^[\w+#.-]+$/;
 
 export function parseBlocks(text: string): Block[] {
   const blocks: Block[] = [];
@@ -31,12 +33,32 @@ export function parseBlocks(text: string): Block[] {
     open = null;
   };
 
-  for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
-    let line = raw.trimEnd();
+  const all = text.replace(/\r\n?/g, "\n").split("\n");
+  for (let i = 0; i < all.length; i++) {
+    let line = all[i].trimEnd();
     const oneLine = ONE_LINE_FENCE.exec(line);
-    if (oneLine?.[1].trim()) line = `\`${oneLine[1].trim()}\``;
-    else if (!FENCE.test(line)) line = line.replace(FENCE_START, "");
-    if (!line.trim() || RULE.test(line) || FENCE.test(line)) {
+    if (oneLine) {
+      close();
+      if (oneLine[1].trim()) blocks.push({ kind: "code", lines: [oneLine[1].trim()] });
+      continue;
+    }
+    const fence = FENCE_START.exec(line);
+    if (fence) {
+      const rest = fence[1].trim();
+      const end = all.findIndex((l, j) => j > i && FENCE_END.test(l));
+      if (end === -1) {
+        line = rest;
+      } else {
+        close();
+        const body = all.slice(i + 1, end).map((l) => l.trimEnd());
+        // "```powershell" names the language; "```hostname" over nothing is the command.
+        const lines = rest && (!LANGUAGE_TAG.test(rest) || !body.some((l) => l.trim())) ? [rest, ...body] : body;
+        if (lines.some((l) => l.trim())) blocks.push({ kind: "code", lines });
+        i = end;
+        continue;
+      }
+    }
+    if (!line.trim() || RULE.test(line)) {
       close();
       continue;
     }
@@ -127,6 +149,8 @@ export function plainAgentText(text: string): string {
           return block.items.map((item) => `- ${flat(item)}`).join("\n");
         case "ol":
           return block.items.map((item, i) => `${block.start + i}. ${flat(item)}`).join("\n");
+        case "code":
+          return block.lines.join("\n");
       }
     })
     .join("\n\n");

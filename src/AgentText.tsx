@@ -49,6 +49,12 @@ export function AgentText(props: { text: string; plain?: (text: string) => React
                 ))}
               </ol>
             );
+          case "code":
+            return (
+              <pre key={i}>
+                <code>{block.lines.join("\n")}</code>
+              </pre>
+            );
         }
       })}
     </div>
