@@ -6,6 +6,13 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Das Portal merkt sich die offene Seite in der Adresse: Nach dem Neuladen bleibt
+  man in derselben Ansicht, am selben Tag in „Zeiten“ und im selben Ticket. Der
+  Zurück-Knopf des Browsers funktioniert, und ein Ticket lässt sich per Link öffnen.
+- Tickets: „Aktualisieren“ lädt die Tickets neu, Liste und Filter bleiben.
+
 ### Geändert
 
 - `AGENTS.md` und `CLAUDE.md` zeigen KI-Agenten den richtigen Installationsweg:

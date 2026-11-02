@@ -664,7 +664,11 @@ export function TicketsView(props: Props) {
   return (
     <div className="tk-page">
       <div className="tk-top">
-        <PageHeader title="Tickets" subtitle={subtitle} />
+        <PageHeader title="Tickets" subtitle={subtitle}>
+          <button className="btn" disabled={loading} onClick={onChanged} title="Tickets neu aus TANSS laden, Liste und Filter bleiben">
+            {loading ? "Lädt …" : "Aktualisieren"}
+          </button>
+        </PageHeader>
 
         <div className="tk-controls">
           <div className="seg" role="tablist" aria-label="Listen">
