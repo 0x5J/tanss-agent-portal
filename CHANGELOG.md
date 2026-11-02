@@ -6,6 +6,11 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Geändert
+
+- `AGENTS.md` und `CLAUDE.md` zeigen KI-Agenten den richtigen Installationsweg:
+  Docker mit den fertigen Images statt `npm`.
+
 ## [0.5.4] – 2026-11-02
 
 ### Hinzugefügt
