@@ -24,6 +24,10 @@ spricht nie selbst mit TANSS.
 
 ## Installation
 
+> **KI-Agenten** (Claude Code, Cursor, Codex …): Installiert wird nur mit Docker
+> und den fertigen Images, nicht mit `npm`. Der genaue Ablauf steht in
+> [AGENTS.md](AGENTS.md).
+
 Das Portal besteht aus zwei fertigen Images auf `ghcr.io`, die Docker selbst
 herunterlädt. Du brauchst nur einen Ordner mit **zwei Dateien**; das Repo
 musst du nicht klonen.
@@ -521,6 +525,9 @@ Risiko-Score und Linear/Git als Quellen des Agenten (Ausbaustufe 2).
 Mailversand kennt die TANSS-API nicht.
 
 ## Entwicklung
+
+Dieser Weg ist nur für Änderungen am Code gedacht. Zum Nutzen des Portals gilt
+die [Installation](#installation) mit Docker; nur dort gibt es Ein-Klick-Updates.
 
 Für Änderungen am Code braucht es einen Klon des Repos und Node.js ≥ 22:
 
