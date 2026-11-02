@@ -41,8 +41,10 @@ type Props = {
   onChanged: () => void;
   onOpen: (id: number) => void;
   agentReady: boolean;
-  /** Which day to open at; today when nothing is given. */
+  /** Which day to show; today when nothing is given. Follows the address. */
   initialDay?: string;
+  /** Tells the app which day is shown, for the address. */
+  onDay: (day: string) => void;
 };
 
 /** The day is drawn at a fixed 48 px per hour, as in the prototype; 07:00–19:00 fills ~600 px. */
@@ -73,6 +75,9 @@ function y(minute: number): number {
 
 export function TimesView(props: Props) {
   const [day, setDay] = useState(props.initialDay ?? todayYmd());
+  const { onDay } = props;
+  useEffect(() => setDay(props.initialDay ?? todayYmd()), [props.initialDay]);
+  useEffect(() => onDay(day), [day, onDay]);
   const [supports, setSupports] = useState<Support[]>([]);
   const [templates, setTemplates] = useState<BookingTemplate[]>([]);
   const [routines, setRoutines] = useState<Routine[]>([]);

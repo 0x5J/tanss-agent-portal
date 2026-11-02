@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type AgentSettings, type AuthConfig, type Meta } from "./api.ts";
+import { formatRoute, parseRoute } from "./route.ts";
+import { todayYmd } from "./format.ts";
 import { Login } from "./Login.tsx";
 import { Shell, type View } from "./Shell.tsx";
 import { DashboardView } from "./views/Dashboard.tsx";
@@ -47,9 +49,9 @@ export function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [theme, setTheme] = useState<Theme>(readTheme);
-  const [view, setView] = useState<View>("today");
-  const [openTicket, setOpenTicket] = useState<number | null>(null);
-  const [timesDay, setTimesDay] = useState<string | null>(null);
+  const [view, setView] = useState<View>(() => parseRoute(window.location.hash).view);
+  const [openTicket, setOpenTicket] = useState<number | null>(() => parseRoute(window.location.hash).ticket);
+  const [timesDay, setTimesDay] = useState<string | null>(() => parseRoute(window.location.hash).day);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToastText] = useState<string | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -169,7 +171,6 @@ export function App() {
     try {
       const result = await api.login(username, password, token);
       setEmployeeId(result.employeeId);
-      setView("today");
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Anmeldung fehlgeschlagen");
     } finally {
@@ -182,6 +183,8 @@ export function App() {
     setEmployeeId(null);
     setMeta(null);
     setOpenTicket(null);
+    setTimesDay(null);
+    setView("today");
   }
 
   const changed = useCallback(() => setReload((n) => n + 1), []);
@@ -197,6 +200,33 @@ export function App() {
     setTimesDay(day);
     setView("times");
   }
+
+  /** The day sheet moved on its own; today stays out of the address, so a reload tomorrow shows tomorrow. */
+  const onTimesDay = useCallback((day: string) => setTimesDay(day === todayYmd() ? null : day), []);
+
+  // The address follows the page. A new view or ticket is a step the back button
+  // can undo; paging through days only rewrites the current step.
+  const shownRoute = useRef({ view, openTicket });
+  useEffect(() => {
+    const next = formatRoute({ view, ticket: openTicket, day: timesDay });
+    const stepped = shownRoute.current.view !== view || shownRoute.current.openTicket !== openTicket;
+    shownRoute.current = { view, openTicket };
+    if (next === window.location.hash) return;
+    if (stepped) window.history.pushState(null, "", next);
+    else window.history.replaceState(null, "", next);
+  }, [view, openTicket, timesDay]);
+
+  // And the page follows the address: back, forward, or a pasted link.
+  useEffect(() => {
+    function onHash() {
+      const route = parseRoute(window.location.hash);
+      setView(route.view);
+      setOpenTicket(route.ticket);
+      setTimesDay(route.day);
+    }
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // g h / g t / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
   const chord = useRef<number | null>(null);
@@ -302,7 +332,7 @@ export function App() {
             openTicketId={openTicket}
             onClearContext={() => setOpenTicket(null)}
             onOpen={setOpenTicket}
-            onView={setView}
+            onView={goto}
             onError={report}
           />
         }
@@ -386,6 +416,7 @@ export function App() {
             onOpen={setOpenTicket}
             agentReady={Boolean(agent?.ready)}
             initialDay={timesDay ?? undefined}
+            onDay={onTimesDay}
           />
         ) : null}
         {view === "analysis" ? (
