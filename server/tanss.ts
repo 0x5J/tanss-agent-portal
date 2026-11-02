@@ -1,4 +1,5 @@
 import type { LoginInput } from "../shared/login.ts";
+import { parseDayStatus, type DayStatus } from "../shared/dayConfirm.ts";
 
 export type TanssSession = {
   employeeId: number;
@@ -97,6 +98,14 @@ export type TanssClient = {
     planningTypes?: readonly string[],
     employeeId?: number,
   ): Promise<{ items: Obj[]; linked: LinkedEntities }>;
+  /**
+   * Whether this employee has to confirm their days, and which are open. Not in
+   * the published API; the TANSS web interface uses it. `day` hardly matters,
+   * the list of open days comes back for any of them.
+   */
+  dayStatus(session: TanssSession, day: string): Promise<DayStatus>;
+  /** Confirms one of the employee's own days. A GET, but it does write. */
+  confirmDay(session: TanssSession, day: string): Promise<void>;
   /** The employee's phone calls within the timeframe. */
   listPhoneCalls(session: TanssSession, from: number, to: number): Promise<Obj[]>;
   createSupport(session: TanssSession, body: Obj): Promise<Obj>;
@@ -394,6 +403,13 @@ export function createTanssClient(opts: {
         buildSupportsListBody(employeeId ?? session.employeeId, from, to, planningTypes),
       );
       return { items: asArray(envelope.content), linked: envelope.meta?.linkedEntities ?? {} };
+    },
+    async dayStatus(session, day) {
+      const envelope = await authed(session, "GET", `/api/v1/ownDailyServices/${day}`);
+      return parseDayStatus(envelope.content);
+    },
+    async confirmDay(session, day) {
+      await authed(session, "GET", `/api/v1/ownDailyServices/${day}/confirm`);
     },
     async listPhoneCalls(session, from, to) {
       const envelope = await authed(

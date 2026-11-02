@@ -8,6 +8,7 @@ import type { TicketRow } from "../../shared/tickets.ts";
 import { byUrgency, dueLabel, dueState, dueToday, firstName, greeting, ownOpen } from "../../shared/today.ts";
 import { nowUnix, todayYmd } from "../format.ts";
 import { Icon, SPARK } from "../ui/kit.tsx";
+import { openDaysHint, shortYmd, type DayStatus } from "../../shared/dayConfirm.ts";
 import { AgentText } from "../AgentText.tsx";
 import type { View } from "../Shell.tsx";
 import "../styles/today.css";
@@ -19,6 +20,8 @@ type Props = {
   reload: number;
   onOpen: (id: number) => void;
   onView: (view: View) => void;
+  /** Opens the day sheet at this day. */
+  onDay: (day: string) => void;
   onError: (error: unknown) => void;
   /** Hands the loaded tickets to the agent sidebar, like the board does. */
   onData: (rows: TicketRow[], activity: Record<number, Activity>) => void;
@@ -69,7 +72,25 @@ export function TodayView(props: Props) {
   );
   const [briefingBusy, setBriefingBusy] = useState(false);
   const [now, setNow] = useState(nowUnix);
+  const [dayStatus, setDayStatus] = useState<DayStatus | null>(null);
   const today = todayYmd();
+  // From TANSS, not from the model: true at once after confirming and without any AI set up.
+  const openDays = openDaysHint(dayStatus, today);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.days
+      .status()
+      .then((status) => {
+        if (!cancelled) setDayStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) onError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.reload, onError]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(nowUnix()), 60_000);
@@ -190,13 +211,19 @@ export function TodayView(props: Props) {
             </button>
           </p>
         )}
+        {openDays ? <p className="briefing-text">{openDays.text}</p> : null}
         <div className="briefing-actions">
+          {openDays ? (
+            <button className="btn primary" onClick={() => props.onDay(openDays.oldest)}>
+              Zum {shortYmd(openDays.oldest)}
+            </button>
+          ) : null}
           {!briefing && props.agentReady ? (
             <button className="btn primary" disabled={briefingBusy || loading || activityPending || own.length === 0} onClick={() => void makeBriefing(false)}>
               {briefingBusy ? "Schreibt …" : activityPending ? "Verläufe laden …" : "Briefing erstellen"}
             </button>
           ) : null}
-          <button className={`btn${briefing || !props.agentReady ? " primary" : ""}`} onClick={() => props.onView("times")}>
+          <button className={`btn${!openDays && (briefing || !props.agentReady) ? " primary" : ""}`} onClick={() => props.onView("times")}>
             Zeiten prüfen
           </button>
           <button className="btn" onClick={() => props.onView("tickets")}>

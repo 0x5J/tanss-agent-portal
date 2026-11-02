@@ -6,6 +6,12 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+### Hinzugefügt
+
+- Zeiten: „Tag bestätigen“ bestätigt den eigenen Tag in TANSS, nach kurzer
+  Rückfrage und immer der älteste offene zuerst. Die Briefing-Karte auf „Heute“
+  nennt ältere offene Tage und führt mit einem Klick zum ältesten.
+
 ## [0.5.3] – 2026-10-22
 
 ### Behoben

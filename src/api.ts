@@ -1,3 +1,4 @@
+import type { DayStatus } from "../shared/dayConfirm.ts";
 import type { TicketRow } from "../shared/tickets.ts";
 import type { ThreadEntry } from "../shared/thread.ts";
 import type { Support } from "../shared/timeline.ts";
@@ -222,6 +223,11 @@ export const api = {
   saveStyle: (style: StyleSettings) => request<{ style: StyleSettings }>("PUT", "/me/style", { style }),
   routines: () => request<{ routines: Routine[] }>("GET", "/me/routines"),
   saveRoutines: (routines: Routine[]) => request<{ routines: Routine[] }>("PUT", "/me/routines", { routines }),
+  days: {
+    status: () => request<DayStatus>("GET", "/me/days/status"),
+    /** Confirms the day in TANSS and answers with the days still open. */
+    confirm: (day: string) => request<DayStatus>("POST", `/me/days/${day}/confirm`, {}),
+  },
   views: () => request<{ views: SavedView[] }>("GET", "/me/views"),
   saveViews: (views: SavedView[]) => request<{ views: SavedView[] }>("PUT", "/me/views", { views }),
   reports: () =>

@@ -186,11 +186,16 @@ export function App() {
 
   const changed = useCallback(() => setReload((n) => n + 1), []);
 
-  /** Every ordinary view change starts the day sheet at today again; only the
-   *  jump from the analysis bars seeds a different day. */
+  /** Every ordinary view change starts the day sheet at today again; only a
+   *  jump to a day (analysis bars, an open day on the start page) seeds another. */
   function goto(next: View) {
     setTimesDay(null);
     setView(next);
+  }
+
+  function showDay(day: string) {
+    setTimesDay(day);
+    setView("times");
   }
 
   // g h / g t / g z / g l, ⌘K, Escape, "/" — the chords of the artboard.
@@ -330,6 +335,7 @@ export function App() {
             reload={reload}
             onOpen={setOpenTicket}
             onView={goto}
+            onDay={showDay}
             onError={report}
             onData={onBoardData}
           />
@@ -388,10 +394,7 @@ export function App() {
             onSubtitle={setSubtitle}
             onError={report}
             onOpen={setOpenTicket}
-            onDay={(day) => {
-              setTimesDay(day);
-              setView("times");
-            }}
+            onDay={showDay}
           />
         ) : null}
         {view === "import" ? (
