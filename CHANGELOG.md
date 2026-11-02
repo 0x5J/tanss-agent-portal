@@ -6,6 +6,8 @@ Alle nennenswerten Änderungen an diesem Projekt. Aufbau nach
 
 ## [Unveröffentlicht]
 
+## [0.5.5] – 2026-11-02
+
 ### Hinzugefügt
 
 - Das Portal merkt sich die offene Seite in der Adresse: Nach dem Neuladen bleibt
@@ -241,7 +243,8 @@ Erste öffentliche Version.
 - Der gespeicherte LLM-API-Key geht nur noch an den gespeicherten Endpoint.
 - Abmelden macht alle Cookies des Kontos serverseitig ungültig, auch Kopien.
 
-[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.4...HEAD
+[Unveröffentlicht]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/0x5J/tanss-agent-portal/compare/v0.5.1...v0.5.2
