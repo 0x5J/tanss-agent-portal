@@ -358,6 +358,15 @@ Tasten: `g h/d/t/z/w/i/l/s` Ansicht, `g a` Agent-Sidebar, `/` Suche, `⌘K` Befe
 zuletzt gewählten Zeile, wie ⇧-Klick in der Liste), `⏎` öffnen, `a` mir zuweisen, `A` (Umschalt) zuweisen an …, `s` Status,
 `f` Fälligkeit, `c` Kommentar in Auswahl, `Esc` schließen.
 
+**Tag bestätigen.** In „Zeiten“ lässt sich der eigene Tag in TANSS bestätigen,
+nach einer kurzen Rückfrage und immer der älteste offene zuerst. Sind ältere
+Tage offen, nennt die Briefing-Karte auf „Heute“ sie mit einem Knopf zum
+ältesten; der laufende Tag zählt dort nicht mit. Der Hinweis kommt direkt aus
+TANSS, nicht vom Modell, und das Bestätigen bleibt ein Klick der Person: Der
+Agent bestätigt nie selbst. Die Adressen (`GET ownDailyServices/{Tag}`, dahinter
+`/confirm`) stehen nicht in der veröffentlichten TANSS-API; antwortet TANSS dort
+nicht, blendet das Portal beides aus.
+
 **Auswertung.** Eigene Ansicht über die gebuchten Zeiten eines frei wählbaren
 Zeitraums: Soll und Ist, abrechenbar gegen intern, Verlauf je Tag/Woche/Monat,
 Top-Tickets, Top-Kunden, Leistungsarten und alle Buchungen als Tabelle. Ein

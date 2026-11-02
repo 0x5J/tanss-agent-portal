@@ -57,6 +57,8 @@ function fakeTanss(overrides: Partial<TanssClient> = {}) {
     technicians: record("technicians", [{ id: 7, name: "Sören" }]),
     supportTypes: record("supportTypes", [{ id: 3, name: "Remote" }]),
     listSupports: record("listSupports", { items: [], linked: {} }),
+    dayStatus: record("dayStatus", { mustConfirm: false, openDays: [] }),
+    confirmDay: record("confirmDay", undefined),
     createSupport: record("createSupport", { id: 77 }),
     supportById: record("supportById", { item: {}, linked: {} }),
     listPhoneCalls: record("listPhoneCalls", []),

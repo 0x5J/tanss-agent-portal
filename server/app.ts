@@ -33,6 +33,7 @@ import {
 import { loadBoard } from "./board.ts";
 import { formatClock, toSupport } from "../shared/timeline.ts";
 import { lockReason, lockText } from "../shared/lock.ts";
+import { shortYmd, type DayStatus } from "../shared/dayConfirm.ts";
 import {
   APPOINTMENT_PLANNING_TYPES,
   appointmentToTemplate,
@@ -615,6 +616,38 @@ export async function buildApp(opts: AppOptions): Promise<FastifyInstance> {
       linkId: ticketId,
     };
   }
+
+  app.get("/me/days/status", async (request, reply) => {
+    return withSession(request, reply, async (session) => {
+      const today = berlinYmd(Math.floor(now() / 1000));
+      try {
+        return await tanss.dayStatus(session, today);
+      } catch (error) {
+        if (error instanceof TanssError && error.status === 401) throw error;
+        // Not a published address: when it fails, the portal just offers nothing.
+        return { mustConfirm: false, openDays: [] } satisfies DayStatus;
+      }
+    });
+  });
+
+  app.post("/me/days/:day/confirm", async (request, reply) => {
+    const day = (request.params as { day: string }).day;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      return reply.code(400).send({ error: "Tag fehlt (YYYY-MM-DD)" });
+    }
+    return withSession(request, reply, async (session) => {
+      const status = await tanss.dayStatus(session, berlinYmd(Math.floor(now() / 1000)));
+      if (!status.openDays.includes(day)) {
+        return reply.code(409).send({ error: `Der ${shortYmd(day)} ist nicht offen.` });
+      }
+      const oldest = status.openDays[0];
+      if (oldest !== day) {
+        return reply.code(409).send({ error: `Erst den ${shortYmd(oldest)} bestätigen.` });
+      }
+      await tanss.confirmDay(session, day);
+      return { ...status, openDays: status.openDays.filter((d) => d !== day) } satisfies DayStatus;
+    });
+  });
 
   app.get("/me/supports", async (request, reply) => {
     const day = String((request.query as { day?: string }).day ?? "");

@@ -51,6 +51,8 @@ function fakeTanss(overrides: Partial<TanssClient> = {}) {
     technicians: record("technicians", [{ id: 7, name: "Ich" }]),
     supportTypes: record("supportTypes", [{ id: 3, name: "Remote" }]),
     listSupports: record("listSupports", { items: [], linked: {} }),
+    dayStatus: record("dayStatus", { mustConfirm: false, openDays: [] }),
+    confirmDay: record("confirmDay", undefined),
     createSupport: record("createSupport", { id: 77 }),
     supportById: record("supportById", { item: {}, linked: {} }),
     listPhoneCalls: record("listPhoneCalls", []),
@@ -498,6 +500,105 @@ describe("supports", () => {
       expect(res.json().error).toBe("Mitarbeiter ungültig");
     }
     expect(calls.some((c) => c.name === "listSupports")).toBe(false);
+  });
+});
+
+describe("day confirmation", () => {
+  const OPEN = { mustConfirm: true, openDays: ["2026-10-26", "2026-10-27"] };
+
+  it("hands out the status for today", async () => {
+    const { client, calls } = fakeTanss({ dayStatus: async (...args) => (calls.push({ name: "dayStatus", args }), OPEN) });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "GET", url: "/me/days/status", headers: { cookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(OPEN);
+    expect(calls.find((c) => c.name === "dayStatus")?.args[1]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("answers no duty when TANSS will not tell, so the portal simply shows nothing", async () => {
+    const { client } = fakeTanss({
+      dayStatus: async () => {
+        throw new TanssError("Nicht gefunden", 404);
+      },
+    });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "GET", url: "/me/days/status", headers: { cookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ mustConfirm: false, openDays: [] });
+  });
+
+  it("does not swallow a lost session on the status", async () => {
+    const { client } = fakeTanss({
+      dayStatus: async () => {
+        throw new TanssError("Sitzung abgelaufen", 401);
+      },
+    });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "GET", url: "/me/days/status", headers: { cookie } });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("confirms the oldest open day and returns the rest", async () => {
+    const { client, calls } = fakeTanss({ dayStatus: async () => OPEN });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "POST", url: "/me/days/2026-10-26/confirm", headers: { cookie } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ mustConfirm: true, openDays: ["2026-10-27"] });
+    expect(calls.filter((c) => c.name === "confirmDay").map((c) => c.args[1])).toEqual(["2026-10-26"]);
+  });
+
+  it("refuses a younger day and names the older one, without calling TANSS", async () => {
+    const { client, calls } = fakeTanss({ dayStatus: async () => OPEN });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "POST", url: "/me/days/2026-10-27/confirm", headers: { cookie } });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain("26.10.");
+    expect(calls.some((c) => c.name === "confirmDay")).toBe(false);
+  });
+
+  it("refuses a day that is not open, without calling TANSS", async () => {
+    const { client, calls } = fakeTanss({ dayStatus: async () => OPEN });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "POST", url: "/me/days/2026-10-23/confirm", headers: { cookie } });
+
+    expect(res.statusCode).toBe(409);
+    expect(calls.some((c) => c.name === "confirmDay")).toBe(false);
+  });
+
+  it("rejects something that is not a day", async () => {
+    const { client, calls } = fakeTanss({ dayStatus: async () => OPEN });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "POST", url: "/me/days/gestern/confirm", headers: { cookie } });
+
+    expect(res.statusCode).toBe(400);
+    expect(calls.some((c) => c.name === "confirmDay")).toBe(false);
+  });
+
+  it("passes on what TANSS says when the confirmation fails", async () => {
+    const { client } = fakeTanss({
+      dayStatus: async () => OPEN,
+      confirmDay: async () => {
+        throw new TanssError("Nicht erlaubt", 403);
+      },
+    });
+    const { app, cookie } = await loggedIn(client);
+
+    const res = await app.inject({ method: "POST", url: "/me/days/2026-10-26/confirm", headers: { cookie } });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("Nicht erlaubt");
   });
 });
 

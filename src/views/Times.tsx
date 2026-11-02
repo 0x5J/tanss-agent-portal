@@ -17,6 +17,7 @@ import {
   type Support,
 } from "../../shared/timeline.ts";
 import { todayYmd } from "../format.ts";
+import { dayConfirmState, shortYmd, type DayStatus } from "../../shared/dayConfirm.ts";
 import { BookingForm, type BookingInitial } from "./BookingForm.tsx";
 import type { BookingTemplate } from "../../shared/template.ts";
 import { durationForGap, routinesForGap, type Routine } from "../../shared/routines.ts";
@@ -96,11 +97,32 @@ export function TimesView(props: Props) {
   const seq = useRef(0);
   const { onSubtitle, onError } = props;
 
+  const [dayStatus, setDayStatus] = useState<DayStatus | null>(null);
+  const [askConfirm, setAskConfirm] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
   const today = supportsOfDay(supports, day);
   const blocks = useMemo(() => buildBlocks(today), [today]);
   const gaps = blocks.filter((b) => b.kind === "gap");
   const dayMinutes = sumMinutes(today);
   const weekMinutes = sumMinutes(supports);
+
+  const confirmState = dayConfirmState(dayStatus, day, todayYmd(), !loading && today.length > 0);
+
+  /** Confirms the day in TANSS; on a refusal the status is fetched anew, it may have moved on. */
+  async function confirmDay() {
+    setConfirming(true);
+    try {
+      setDayStatus(await api.days.confirm(day));
+      props.onToast(`${shortYmd(day)} bestätigt`);
+    } catch (error) {
+      onError(error);
+      props.onChanged();
+    } finally {
+      setConfirming(false);
+      setAskConfirm(false);
+    }
+  }
 
   /** Opens the floating card for a draft, anchored at its time (or at the next free slot). */
   function openDraft(draft: BookingInitial) {
@@ -167,6 +189,21 @@ export function TimesView(props: Props) {
   useEffect(() => {
     onSubtitle(formatLongDate(day));
   }, [day, onSubtitle]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.days
+      .status()
+      .then((status) => {
+        if (!cancelled) setDayStatus(status);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) onError(error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.reload, onError]);
 
   useEffect(() => {
     setForm(null);
@@ -311,6 +348,22 @@ export function TimesView(props: Props) {
         <button className="btn round" onClick={() => setDay(shiftYmd(day, 1))} aria-label="Folgetag" title="Folgetag">
           →
         </button>
+        {confirmState.kind === "open" ? (
+          <button className="btn" onClick={() => setAskConfirm(true)}>
+            Tag bestätigen
+          </button>
+        ) : null}
+        {confirmState.kind === "blocked" ? (
+          <>
+            <button className="btn" disabled>
+              Tag bestätigen
+            </button>
+            <button className="linkish day-first" onClick={() => setDay(confirmState.oldest)}>
+              Erst den {shortYmd(confirmState.oldest)} bestätigen
+            </button>
+          </>
+        ) : null}
+        {confirmState.kind === "confirmed" ? <span className="day-confirmed">✓ Bestätigt</span> : null}
         <button
           className="btn primary lg"
           onClick={() => openDraft({ date: day, startMinute: nextFreeStart(today), duration: CLICK_MINUTES })}
@@ -318,6 +371,31 @@ export function TimesView(props: Props) {
           Zeit erfassen
         </button>
       </PageHeader>
+
+      {askConfirm ? (
+        <div className="palette-backdrop" onClick={() => (confirming ? null : setAskConfirm(false))}>
+          <div
+            className="palette day-dialog"
+            role="dialog"
+            aria-label="Tag bestätigen"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !confirming) setAskConfirm(false);
+            }}
+          >
+            <h2>{formatLongDate(day)} bestätigen?</h2>
+            <p className="muted">Hast du alle Zeiten für diesen Tag erfasst?</p>
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <button autoFocus className="btn ghost" disabled={confirming} onClick={() => setAskConfirm(false)}>
+                Abbrechen
+              </button>
+              <button className="btn primary" disabled={confirming} onClick={() => void confirmDay()}>
+                {confirming ? "Bestätigt …" : "Tag bestätigen"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="times-meter">
         {loading ? (
